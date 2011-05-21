@@ -2,6 +2,7 @@ package main
 
 import (
 	"os"
+	"path"
 	"bufio"
 	ioutil "io/ioutil"
 	"compress/gzip"
@@ -53,13 +54,7 @@ func (srcpkg *SrcPkg) Make(buildroot string) ([]string, os.Error) {
 // source package tarball.
 func srcFilePkgName(pkgpath string) (string, os.Error) {
 	// Guess the name of the directory that was extracted under buildroot
-	begidx := strings.LastIndex(pkgpath, "/")
-	if begidx == -1 {
-		begidx = 0
-	} else {
-		begidx++
-	}
-	filename := pkgpath[begidx:]
+	filename := path.Base(pkgpath)
 	endidx := strings.Index(filename, ".")
 	if endidx == -1 {
 		return "", os.NewError("Invalid source package filename: " + filename)
