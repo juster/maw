@@ -81,14 +81,7 @@ func (srcpkg *SrcPkg) Untar(destdir string) (srcdir *SrcDir, err os.Error) {
 		return nil, err
 	}
 	pkgname, err := srcFilePkgName(srcpkg.path)
-	if _, err = f.Seek(0, 0); err != nil {
-		return nil, err
-	}
-	gr, err = gzip.NewReader(f)
 	if err != nil {
-		return nil, err
-	}
-	if pkgname, err = tar.Peek(gr); err != nil {
 		return nil, err
 	}
 	return NewSrcDir(destdir + "/" + pkgname)
