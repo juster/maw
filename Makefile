@@ -1,10 +1,10 @@
 include $(GOROOT)/src/Make.inc
 
 TARG=maw
-GOFILES=maw.go srcpkg.go goarchive.go
+GOFILES=main.go maw.go srcpkg.go goarchive.go
 CLEANFILES+=*.gz ./tmp/*
 
-include $(GOROOT)/src/Make.pkg
+include $(GOROOT)/src/Make.cmd
 
 install-goarchive:
 	goinstall -u github.com/str1ngs/goarchive
