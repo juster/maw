@@ -7,7 +7,6 @@ import (
 	"bufio"
 	"compress/gzip"
 	"strings"
-	tar "github.com/str1ngs/goarchive"
 )
 
 type SrcPkg struct {
@@ -73,7 +72,7 @@ func srcFilePkgName(pkgpath string) (string, os.Error) {
 // Untar uses the tar program to extract the source tarball to our buildroot (destdir).
 // Returns a SrcDir pointer or nil and an error on failure.
 func (srcpkg *SrcPkg) Untar(destdir string) (srcdir *SrcDir, err os.Error) {
-	tar := tar.NewTar()
+	tar := NewTar()
 	f, err := os.Open(srcpkg.path)
 	if err != nil {
 		return nil, err
