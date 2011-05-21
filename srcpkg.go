@@ -5,7 +5,10 @@ import (
     "rand"
     "time"
     "bufio"
+	"compress/gzip"
+    "fmt"
     "strings"
+	tar "github.com/str1ngs/goarchive"
 )
 
 type SrcPkg struct {
@@ -62,13 +65,12 @@ func srcFilePkgName (pkgpath string) (string, os.Error) {
 
 // Untar uses the tar program to extract the source tarball to our buildroot (destdir).
 // Returns a SrcDir pointer or nil and an error on failure.
-func (srcpkg *SrcPkg) Untar (destdir string) (*SrcDir, os.Error) {
+func (srcpkg *SrcPkg) UntarOld (destdir string) (*SrcDir, os.Error) {
     // If TAR_OPTIONS is set, it will be used by tar and affect its behavior.
     if oldval := os.Getenv("TAR_OPTIONS"); oldval != "" {
         os.Setenv("TAR_OPTIONS", "")
         defer os.Setenv("TAR_OPTIONS", oldval)
     }
-    
     args := []string{
         "tar",
         "--extract",
@@ -78,6 +80,7 @@ func (srcpkg *SrcPkg) Untar (destdir string) (*SrcDir, os.Error) {
     
     files := []*os.File{ os.Stdin, os.Stdout, os.Stderr }
     procattr := &os.ProcAttr{ destdir, nil, files }
+	fmt.Println(args)
     tarproc, err := os.StartProcess("/bin/tar", args, procattr)
     if err != nil { return nil, err }
     
@@ -92,6 +95,28 @@ func (srcpkg *SrcPkg) Untar (destdir string) (*SrcDir, os.Error) {
     if (err != nil) { return nil, err }
     return NewSrcDir(destdir + "/" + pkgname)
 }
+
+func (srcpkg *SrcPkg) Untar (destdir string) (*SrcDir, os.Error) {
+	tar := tar.NewTar()
+	f,err := os.Open(srcpkg.path)
+	if err != nil { return nil,err }
+	defer f.Close()
+	gr,err := gzip.NewReader(f)
+	if err != nil { return nil,err }
+	defer gr.Close()
+	err = tar.Untar(destdir,gr)
+	if err != nil { return nil, err }
+    pkgname, err := srcFilePkgName(srcpkg.path)
+	_,err = f.Seek(0,0)
+	if err != nil { return nil, err }
+	gr,err = gzip.NewReader(f)
+	if err != nil { return nil, err }
+	pkgname,err = tar.Peek(gr)
+    if (err != nil) { return nil, err }
+    return NewSrcDir(destdir + "/" + pkgname)
+}
+
+
 
 // Creates a random filename under /tmp and makes sure it is
 // not already taken.

@@ -1,0 +1,13 @@
+package maw
+
+import (
+	"testing"
+)
+
+func TestTest(t *testing.T) {
+	ac := &AURCache{"./","./","./"}
+	_, err := ac.Fetch("cower-git")
+	if err != nil {
+		t.Error(err)
+	}
+}
