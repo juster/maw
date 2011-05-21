@@ -106,7 +106,7 @@ func (srcpkg *SrcPkg) Untar (destdir string) (*SrcDir, os.Error) {
 	defer gr.Close()
 	err = tar.Untar(destdir,gr)
 	if err != nil { return nil, err }
-    pkgname, err := srcFilePkgName(srcpkg.path)
+	pkgname, err := srcFilePkgName(srcpkg.path)
 	_,err = f.Seek(0,0)
 	if err != nil { return nil, err }
 	gr,err = gzip.NewReader(f)
