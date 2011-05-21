@@ -2,9 +2,8 @@ package maw
 
 import (
 	"os"
-	"rand"
-	"time"
 	"bufio"
+	ioutil "io/ioutil"
 	"compress/gzip"
 	"strings"
 )
@@ -100,33 +99,17 @@ func (srcpkg *SrcPkg) Untar(destdir string) (srcdir *SrcDir, err os.Error) {
 	return NewSrcDir(destdir + "/" + pkgname)
 }
 
-// Creates a random filename under /tmp and makes sure it is
-// not already taken.
-func tmpFileName() string {
-	var filename string
-	chars := [8]int{}
-	for {
-		src := rand.NewSource(time.Seconds())
-		r := rand.New(src)
-		for i := 0; i < 8; i++ {
-			chars[i] = 'a' + r.Intn('z'-'a')
-		}
-		filename = os.TempDir() + "/" + string(chars[:])
-		if _, err := os.Stat(filename); err != nil {
-			// Stat will fail if file does not exist, which is what we want.
-			break
-		}
-	}
-	return filename
-}
-
 // Muahahaha!
 // This creates the bash code we use to hook into makepkg. Makepkg
 // will then print out the paths of the packages that it just created to
 // the temporary filename we choose.
 // Returns the bash code and temporary file name.
-func bashHack() (string, string) {
-	tmpfile := tmpFileName()
+func bashHack() (string, *os.File, os.Error) {
+	tmpfile, err := ioutil.TempFile("", "maw")
+	if err != nil {
+		return "", nil, err
+	}
+
 	bash := `
 exit () {
   if [ "$1" -ne 0 ] ; then command exit $1 ; fi
@@ -135,7 +118,7 @@ exit () {
     for arch in "$CARCH" any ; do
       pkgfile="${PKGDEST}/${pkg}-${fullver}-${arch}${PKGEXT}"
       if [ -f "$pkgfile" ] ; then
-        echo "$pkgfile" >>` + tmpfile + `
+        echo "$pkgfile" >>` + tmpfile.Name() + `
       fi
     done
   done
@@ -143,7 +126,7 @@ exit () {
 }
 source makepkg
 `
-	return bash, tmpfile
+	return bash, tmpfile, nil
 }
 
 // makepkg runs makepkg on the specified builddir. The resulting package is
@@ -162,7 +145,11 @@ func (srcdir *SrcDir) makepkg() ([]string, os.Error) {
 		return nil, err
 	}
 
-	bashcode, tmpfilename := bashHack()
+	bashcode, tmpfile, err := bashHack()
+	if err != nil {
+		return nil, err
+	}
+	defer tmpfile.Close()
 
 	// We must force $0 to be makepkg... makepkg runs $0 internally.
 	// Arguments after "-c" "..." override positional arguments $0, $1, ...
@@ -199,7 +186,6 @@ func (srcdir *SrcDir) makepkg() ([]string, os.Error) {
 	// Read our sneaky tempfile. It contains the names of package files
 	// that were built by makepkg.
 	pkgpaths := make([]string, 0, 32)
-	tmpfile, err := os.Open(tmpfilename)
 	if err != nil {
 		return nil, err
 	}
@@ -220,6 +206,8 @@ RESULTLOOP:
 			return nil, err
 		}
 	}
+
+	tmpfilename := tmpfile.Name()
 	tmpfile.Close()
 	err = os.Remove(tmpfilename)
 	if err != nil {
