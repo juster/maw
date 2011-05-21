@@ -100,26 +100,26 @@ func (z *Tar) Untar(dest string, cr io.Reader) (err os.Error) {
 
 // Make directory with permission
 func mkDir(path string, mode int64) (err os.Error) {
-	if !fileExists(path) {
-		if err = os.Mkdir(path, uint32(mode)); err != nil {
-			return err
-		}
+	if fileExists(path) {
+		return
+	}
+	err = os.Mkdir(path, uint32(mode))
+	if err != nil {
+		return err
 	}
 	return
 }
 
 // Write file from tar reader
 func writeFile(path string, hdr *tar.Header, tr *tar.Reader) (err os.Error) {
-	if !fileExists(path) {
-		f, err := os.Create(path)
-		if err != nil {
-			return err
-		}
-		_, err = io.Copy(f, tr)
-		f.Close()
-		if err != nil {
-			return err
-		}
+	f, err := os.Create(path)
+	if err != nil {
+		return err
+	}
+	_, err = io.Copy(f, tr)
+	f.Close()
+	if err != nil {
+		return err
 	}
 	return
 }
