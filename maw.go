@@ -3,7 +3,7 @@
  * Justin Davis <jrcd83 at googlemail>
  */
 
-package maw
+package main
 
 import (
 	"os"

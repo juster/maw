@@ -3,7 +3,7 @@
  * Justin Davis <jrcd83 at googlemail>
  */
 
-package maw
+package main
 
 import (
 	"fmt"
@@ -11,7 +11,7 @@ import (
 
 func main() {
 	aur := &AURCache{".", ".", "."}
-	paths, err := aur.Fetch("perl-cower-git")
+	paths, err := aur.Fetch("cower-git")
 	if err != nil {
 		fmt.Printf("ERROR: %s\n", err.String())
 	} else {

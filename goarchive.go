@@ -1,4 +1,4 @@
-package maw
+package main
 
 import (
 	"archive/tar"
