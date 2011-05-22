@@ -70,7 +70,7 @@ func (aur *AURCache) Fetch(pkgname string) ([]string, *FetchError) {
 		return nil, NotFoundError(pkgname)
 	}
 
-	srcpkg, err := NewSrcPkg(path)
+	srcpkg, err := OpenSrcPkg(path)
 	if err != nil {
 		return nil, NewFetchError(pkgname, err)
 	}
