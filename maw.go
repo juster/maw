@@ -49,14 +49,6 @@ type AURCache struct {
 	Buildroot  string
 }
 
-func mkdirIfMissing(path string) os.Error {
-	err := os.Mkdir(path, 0755)
-	if err == os.EEXIST {
-		return nil
-	}
-	return err
-}
-
 func (aur *AURCache) srcPkgPath(pkgname string) string {
 	return fmt.Sprintf("%s/%s.src.tar.gz", aur.Srcpkgdest, pkgname)
 }
@@ -75,6 +67,7 @@ func (aur *AURCache) Fetch(pkgname string) ([]string, *FetchError) {
 		return nil, NewFetchError(pkgname, err)
 	}
 	pkgpaths, err := srcpkg.Make(aur.Buildroot)
+	srcpkg.Close()
 	if err != nil {
 		return nil, NewFetchError(pkgname, err)
 	}

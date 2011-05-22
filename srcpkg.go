@@ -40,7 +40,7 @@ func (srcpkg *SrcPkg) Close() {
 	srcpkg.file.Close()
 }
 
-// srcFilePkgName extracts the name of the package from the path of the source package tarball.
+// PackageName extracts the name of the package from the path of the source package tarball.
 func (srcpkg *SrcPkg) PackageName() (string, os.Error) {
 	filename := path.Base(srcpkg.path)
 	endidx := strings.Index(filename, ".")
@@ -78,7 +78,7 @@ func (srcpkg *SrcPkg) Extract(destdir string) (*SrcDir, os.Error) {
 			if hdr.Name != dirname {
 				return nil, os.NewError("Tarball dir (" + hdr.Name + ") should be " + dirname)
 			}
-			if err := makeDirEntry(destdir, hdr); err != nil {
+			if err := prepDirectory(destpkgdir); err != nil {
 				return nil, err
 			}
 		case tar.TypeSymlink, tar.TypeLink:
@@ -109,8 +109,8 @@ func (srcpkg *SrcPkg) Extract(destdir string) (*SrcDir, os.Error) {
 	return OpenSrcDir(destpkgdir)
 }
 
-func makeDirEntry(parent string, hdr *tar.Header) (os.Error) {
-	newpath := path.Join(parent, hdr.Name)
+// prepDirectory creates a new directory unless one already exists.
+func prepDirectory(newpath string) (os.Error) {
 	switch stat, err := os.Stat(newpath); {
 	case err == nil:
 		// If directory already exists that's cool, too.
@@ -121,13 +121,13 @@ func makeDirEntry(parent string, hdr *tar.Header) (os.Error) {
 	default:
 		return err
 	}
-	return os.Mkdir(newpath, uint32(hdr.Mode))
+	return os.Mkdir(newpath, 0755)
 }
 
-// Makepkg extracts the srcpkg to the buildroot, then builds the binary package using
-// makepkg. PKGDEST should be set before calling this func to force where
-// the binary package will end up.
-// Returns the path to the package file and nil on success; nil and error on failure.
+// Make extracts the srcpkg to the buildroot, then builds the binary package using
+// makepkg.
+// PKGDEST should be set before calling this func to force where the binary package will end up.
+// Returns the path to the package files and nil on success; nil and error on failure.
 func (srcpkg *SrcPkg) Make(buildroot string) ([]string, os.Error) {
 	srcdir, err := srcpkg.Extract(buildroot)
 	if err != nil {
