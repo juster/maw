@@ -2,6 +2,9 @@ package main
 
 import (
 	"os"
+	"fmt"
+	"path"
+	"time"
 	"bufio"
 	"io/ioutil"
 )
@@ -19,6 +22,25 @@ func OpenSrcDir(path string) (*SrcDir, os.Error) {
 		return nil, os.NewError(path + " is not a valid source directory")
 	}
 	return &SrcDir{path}, nil
+}
+
+func openBuildLog(builddir string) (*os.File, os.Error) {
+	tm := time.LocalTime()
+	suffidx, suffix := 1, ""
+	for {
+		fname := fmt.Sprintf("mawbuild-%02d%02d%s.log", tm.Month, tm.Day, suffix)
+		fqp := path.Join(builddir, fname)
+		switch f, err := os.OpenFile(fqp, os.O_CREATE | os.O_WRONLY | os.O_EXCL, 0644); {
+		case err == nil: return f, nil
+		case err.(*os.PathError).Error.String() != "file already exists": return nil, err
+		}
+		
+		if suffix == "" {
+			suffidx++
+			suffix = fmt.Sprintf("-%d", suffidx)
+		}
+	}
+	return nil, os.NewError("Internal error: openBuildLog failed")
 }
 
 // Muahahaha!
@@ -56,6 +78,13 @@ source makepkg
 // should be done before calling this function.
 // Returns the paths of built packages or nil and error if makepkg fails.
 func (srcdir *SrcDir) makepkg() ([]string, os.Error) {
+	// Open our logfile before we Chdir.
+	outlog, err := openBuildLog(srcdir.builddir)
+	if err != nil {
+		return nil, err
+	}
+	defer outlog.Close()
+	
 	// Chdir to builddir. Chdir back on func exit.
 	olddir, err := os.Getwd()
 	if err != nil {
@@ -82,15 +111,7 @@ func (srcdir *SrcDir) makepkg() ([]string, os.Error) {
 	args := []string{"bash", "-c", bashcode, "makepkg", "-m", "-f"}
 
 	// Prepare to rock makepkg's world!
-	outnull, err := os.OpenFile(os.DevNull, os.O_WRONLY, 0666)
-	if err != nil {
-		return nil, err
-	}
-	errnull, err := os.OpenFile(os.DevNull, os.O_WRONLY, 0666)
-	if err != nil {
-		return nil, err
-	}
-	files := []*os.File{nil, os.Stdout, os.Stderr}
+	files := []*os.File{nil, outlog, outlog}
 	attr := &os.ProcAttr{"", nil, files}
 
 	// Start it up and wait for it to finish.
@@ -98,6 +119,7 @@ func (srcdir *SrcDir) makepkg() ([]string, os.Error) {
 	if err != nil {
 		return nil, err
 	}
+	defer proc.Release()
 	status, err := proc.Wait(0)
 	if err != nil {
 		return nil, err
@@ -105,9 +127,6 @@ func (srcdir *SrcDir) makepkg() ([]string, os.Error) {
 	if code := status.ExitStatus(); code != 0 {
 		return nil, os.NewError("makepkg failed")
 	}
-	outnull.Close()
-	errnull.Close()
-	proc.Release()
 
 	// Read our sneaky tempfile. It contains the names of package files
 	// that were built by makepkg.

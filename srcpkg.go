@@ -57,7 +57,6 @@ func (srcpkg *SrcPkg) Extract(destdir string) (*SrcDir, os.Error) {
 	if err != nil {
 		return nil, err
 	}
-	dirname += "/"
 
 	oldmask := syscall.Umask(0033)
 	defer syscall.Umask(oldmask)
@@ -75,7 +74,7 @@ func (srcpkg *SrcPkg) Extract(destdir string) (*SrcDir, os.Error) {
 		
 		switch hdr.Typeflag {
 		case tar.TypeDir:
-			if hdr.Name != dirname {
+			if tardir := strings.TrimRight(hdr.Name, "/"); tardir != dirname {
 				return nil, os.NewError("Tarball dir (" + hdr.Name + ") should be " + dirname)
 			}
 			if err := prepDirectory(destpkgdir); err != nil {
@@ -85,6 +84,7 @@ func (srcpkg *SrcPkg) Extract(destdir string) (*SrcDir, os.Error) {
 			return nil, os.NewError("Links were found inside the source package, aborting.")
 		case tar.TypeReg, tar.TypeRegA:
 			dir, filename := path.Split(hdr.Name)
+			dir = strings.TrimRight(dir, "/")
 			if dir != dirname {
 				errstr := fmt.Sprintf("File (%s) in source package is not contained in the " +
 					"package dir (%s)", hdr.Name, dirname)
