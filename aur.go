@@ -14,7 +14,7 @@ import (
 )
 
 const (
-	AUR_ROOT      = "http://aur.archlinux.org"
+	AUR_ROOT = "http://aur.archlinux.org"
 	MAW_USERAGENT = "maw/1.0"
 )
 
@@ -116,7 +116,7 @@ func (aur *AURCache) downloadNewer(pkgname string) (string, os.Error) {
 		break
 	case 304:
 		if mtime == 0 {
-			panic("Received HTTP not modified without requesting it")
+			return "", os.NewError("Received HTTP not modified without requesting it")
 		}
 		return path, nil
 	default:
