@@ -18,7 +18,7 @@ func fetchPackage(c chan []string, fetchers []PackageFetcher, pkgname string) {
 
 				continue
 			}
-			fmt.Printf("ERROR: %s\n", err.String())
+			fmt.Printf("ERROR: %s: %s\n", pkgname, err.String())
 			c <- nil
 			return
 		}
@@ -40,13 +40,11 @@ func main() {
 		go fetchPackage(pkgchan, fetchers, arg)
 	}
 
-	fmt.Printf("DBG: len=%d\n", len(os.Args)-1)
 	i := 0
 	for i < len(os.Args)-1 {
 		for _, path := range <- pkgchan {
-			fmt.Printf("Package: %s\n", path )
+			fmt.Printf("package: %s\n", path )
 		}
 		i++
-		fmt.Printf("DBG: i=%d\n", i)
 	}
 }

@@ -5,6 +5,7 @@ import (
 	"os"
 	"fmt"
 	"path"
+	"path/filepath"
 	"strings"
 	"syscall"
 	"archive/tar"
@@ -91,16 +92,7 @@ func (srcpkg *SrcPkg) Extract(destdir string) (*SrcDir, os.Error) {
 				return nil, os.NewError(errstr)
 			}
 
-			file, err := os.Create(path.Join(destpkgdir, filename))
-			if err != nil {
-				return nil, err
-			}
-
-			_, err = io.Copy(file, rdr)
-			file.Close()
-			if err != nil {
-				return nil, err
-			}
+			srcpkg.extractFile(path.Join(destpkgdir, filename), hdr)
 		default:
 			return nil, os.NewError("Invalid tar header type: " + string(hdr.Typeflag))
 		}
@@ -124,12 +116,36 @@ func prepDirectory(newpath string) (os.Error) {
 	return os.Mkdir(newpath, 0755)
 }
 
+func (srcpkg *SrcPkg) extractFile(newpath string, hdr *tar.Header) os.Error {
+	file, err := os.Create(newpath)
+	if err != nil {
+		return err
+	}
+
+	_, err = io.Copy(file, srcpkg.reader)
+	file.Close()
+	if err != nil {
+		return err
+	}
+
+	ubuf := &syscall.Utimbuf{int32(hdr.Atime), int32(hdr.Mtime)}
+	if errno := syscall.Utime(newpath, ubuf); errno != 0 {
+		return os.NewError("Failed to set modification time for "+newpath)
+	}
+
+	return nil
+}
+
 // Make extracts the srcpkg to the buildroot, then builds the binary package using
 // makepkg.
 // PKGDEST should be set before calling this func to force where the binary package will end up.
 // Returns the path to the package files and nil on success; nil and error on failure.
 func (srcpkg *SrcPkg) Make(buildroot string) ([]string, os.Error) {
-	srcdir, err := srcpkg.Extract(buildroot)
+	buildpath, err := filepath.Abs(buildroot)
+	if err != nil {
+		return nil, err
+	}
+	srcdir, err := srcpkg.Extract(buildpath)
 	if err != nil {
 		return nil, err
 	}

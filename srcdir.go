@@ -82,17 +82,6 @@ func (srcdir *SrcDir) makepkg() ([]string, os.Error) {
 		return nil, err
 	}
 	defer outlog.Close()
-	
-	// Chdir to builddir. Chdir back on func exit.
-	olddir, err := os.Getwd()
-	if err != nil {
-		return nil, err
-	}
-	defer os.Chdir(olddir)
-	err = os.Chdir(srcdir.builddir)
-	if err != nil {
-		return nil, err
-	}
 
 	bashcode, tmpfile, err := bashHack()
 	if err != nil {
@@ -110,7 +99,7 @@ func (srcdir *SrcDir) makepkg() ([]string, os.Error) {
 
 	// Prepare to rock makepkg's world!
 	files := []*os.File{nil, outlog, outlog}
-	attr := &os.ProcAttr{"", nil, files}
+	attr := &os.ProcAttr{srcdir.builddir, nil, files}
 
 	// Start it up and wait for it to finish.
 	proc, err := os.StartProcess("/bin/bash", args, attr)
