@@ -1,5 +1,5 @@
-/* maw.go
- * Makepkg AUR Wrapper
+/* aur.go
+ * Code for interfacing with the AUR.
  * Justin Davis <jrcd83 at googlemail>
  */
 
