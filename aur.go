@@ -40,6 +40,7 @@ func (aur *AURCache) Fetch(pkgname string) ([]string, *FetchError) {
 	if err != nil {
 		return nil, NewFetchError(pkgname, err.String())
 	}
+	fmt.Printf("DBG: Building %s...\n", pkgname)
 	pkgpaths, err := srcpkg.Make(aur.Buildroot)
 	srcpkg.Close()
 	if err != nil {

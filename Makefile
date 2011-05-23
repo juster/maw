@@ -1,7 +1,7 @@
 include $(GOROOT)/src/Make.inc
 
 TARG=maw
-GOFILES=main.go aur.go srcpkg.go srcdir.go
+GOFILES=main.go fetch.go pacman.go aur.go srcpkg.go srcdir.go
 CLEANFILES+=*.gz ./tmp/*
 
 include $(GOROOT)/src/Make.cmd

@@ -32,13 +32,11 @@ func openBuildLog(builddir string) (*os.File, os.Error) {
 		fqp := path.Join(builddir, fname)
 		switch f, err := os.OpenFile(fqp, os.O_CREATE | os.O_WRONLY | os.O_EXCL, 0644); {
 		case err == nil: return f, nil
-		case err.(*os.PathError).Error.String() != "file already exists": return nil, err
+		case err.(*os.PathError).Error.String() != "file exists": return nil, err
 		}
 		
-		if suffix == "" {
-			suffidx++
-			suffix = fmt.Sprintf("-%d", suffidx)
-		}
+		suffidx++
+		suffix = fmt.Sprintf("-%d", suffidx)
 	}
 	return nil, os.NewError("Internal error: openBuildLog failed")
 }

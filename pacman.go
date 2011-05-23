@@ -24,7 +24,7 @@ func (pf *PacmanFetcher) readLine(readhandle io.Reader) (string) {
 }
 
 func (pf *PacmanFetcher) findPackageUrl(pkgname string) (string, *FetchError) {
-	cmd, err := exec.Run("pacman", []string{"pacman", "-S", "--print", pkgname}, nil, "",
+	cmd, err := exec.Run("/usr/bin/pacman", []string{"pacman", "-S", "--print", pkgname}, nil, "",
 		exec.DevNull, exec.Pipe, exec.Pipe)
 	if err != nil {
 		return "", NewFetchError(pkgname, err.String())
