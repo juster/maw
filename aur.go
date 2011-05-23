@@ -6,42 +6,16 @@
 package main
 
 import (
+	"io"
 	"os"
 	"http"
 	"fmt"
-	"io"
 	"time"
 )
 
 const (
 	AUR_ROOT = "http://aur.archlinux.org"
-	MAW_USERAGENT = "maw/1.0"
 )
-
-type FetchError struct {
-	NotFound bool
-	Query    string
-	Message  string
-}
-
-func (err *FetchError) String() string {
-	if err.NotFound {
-		return fmt.Sprintf("Package '%s' not found", err.Query)
-	}
-	return err.Message
-}
-
-func NewFetchError(pkgname string, err os.Error) *FetchError {
-	return &FetchError{false, pkgname, err.String()}
-}
-
-func NotFoundError(pkgname string) *FetchError {
-	return &FetchError{true, pkgname, ""}
-}
-
-type PackageFetcher interface {
-	Fetch(pkgname string) ([]string, *FetchError)
-}
 
 type AURCache struct {
 	Pkgdest    string
@@ -56,7 +30,7 @@ func (aur *AURCache) srcPkgPath(pkgname string) string {
 func (aur *AURCache) Fetch(pkgname string) ([]string, *FetchError) {
 	path, err := aur.downloadNewer(pkgname)
 	if err != nil {
-		return nil, NewFetchError(pkgname, err)
+		return nil, NewFetchError(pkgname, err.String())
 	}
 	if path == "" {
 		return nil, NotFoundError(pkgname)
@@ -64,12 +38,12 @@ func (aur *AURCache) Fetch(pkgname string) ([]string, *FetchError) {
 
 	srcpkg, err := OpenSrcPkg(path)
 	if err != nil {
-		return nil, NewFetchError(pkgname, err)
+		return nil, NewFetchError(pkgname, err.String())
 	}
 	pkgpaths, err := srcpkg.Make(aur.Buildroot)
 	srcpkg.Close()
 	if err != nil {
-		return nil, NewFetchError(pkgname, err)
+		return nil, NewFetchError(pkgname, err.String())
 	}
 
 	return pkgpaths, nil
@@ -110,7 +84,6 @@ func (aur *AURCache) downloadNewer(pkgname string) (string, os.Error) {
 		return "", err
 	}
 	defer resp.Body.Close()
-	fmt.Printf("*DBG* StatusCode=%d\n", resp.StatusCode)
 	switch resp.StatusCode {
 	case 200:
 		break

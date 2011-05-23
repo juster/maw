@@ -1,114 +1,106 @@
 /*	pacman.go
-	Pacman command-line parsing and functions for calling pacman.
+	Pacman package file fetching.
 */
 
 package main
 
 import (
-	"regexp"
-	"strings"
+	"os"
+	"io"
+	"bufio"
+	"exec"
+	"path"
+	"http"
 )
 
-const (
-	ShortOpt = iota
-	LongOpt = iota
-	NotOpt = iota
-	ParamedShortOpts = "bopr"
-)
-
-const (
-	NotAction = iota
-	SyncAction = iota
-	OtherAction = iota
-)
-
-var (
-	cmdOpt = regexp.MustCompile("^-([A-Za-z]+)|(-[a-z\\-]+)$")
-	actionOpt = regexp.MustCompile(
-	ParamedLongOpts = []string{"dbpath", "root", "arch", "cachedir", "config", "logfile",
-		"owns", "file", "search", "print-format", "ignore", "ignoregroup"}
-)
-
-type PacmanOpt struct {
-	Type int
-	Action int
-	Raw string
+type PacmanFetcher struct {
+	pkgdest string
 }
 
-func ParsePacmanOpt(opt string) *PacmanOpt {
-	optFlags := cmdOpt.FindStringSubmatch(opt)
-	for i, match := range optFlags {
-		switch i {
-		case 0:
-			if 
-			return &PacmanOpt{ShortOpt, match}
-		case 1: return &PacmanOpt{LongOpt, match}
-		}
+func (pf *PacmanFetcher) readLine(readhandle io.Reader) (string) {
+	buf := bufio.NewReader(readhandle)
+	line, _, _ := buf.ReadLine()
+	return string(line)
+}
+
+func (pf *PacmanFetcher) findPackageUrl(pkgname string) (string, *FetchError) {
+	cmd, err := exec.Run("pacman", []string{"pacman", "-S", "--print", pkgname}, nil, "",
+		exec.DevNull, exec.Pipe, exec.Pipe)
+	if err != nil {
+		return "", NewFetchError(pkgname, err.String())
 	}
-	return &PacmanOpt{NotOpt, opt}
-}
-
-func (opt *PacmanOpt) Contains(char byte) bool {
-	sub := string(char)
-	return strings.Contains(opt.Raw, sub)
-}
-
-func (opt *PacmanOpt) FlagOn(char byte) bool {
-	return opt.Type == ShortOpt && opt.Contains(char)
-}
-
-func (opt *PacmanOpt) IsSyncAction() bool {
-	return opt.Contains('S')
-}
-
-func (opt *PacmanOpt) TakesParam() bool {
-	switch opt.Type {
-	case ShortOpt:
-		// TODO: -l only takes arguments when used in syncing (aka -S)
-		for _, ch := range ParamedShortOpts {
-			if opt.Contains(byte(ch)) {
-				return true
-			}
-		}
-	case LongOpt:
-		for _, popt := range ParamedLongOpts {
-			if opt.Raw == popt {
-				return true
-			}
-		}
-	}
-	return false
-}
-
-func ParseSyncTargets(cmdargs []string) []string {
-	var sync_found, disable_sync bool
-	targets := make([]string, 0, 128)
+	defer cmd.Close()
 	
-	for i := 0; i < len(cmdargs); i++ {
-		opt := ParsePacmanOpt(cmdargs[i])
-		
-		// This argument is a package target, save it for later.
-		if opt.Type == NotOpt {
-			targets = append(targets, opt.Raw)
-			continue
-		}
-		// We have found a sync request.
-		if opt.FlagOn('S') {
-			sync_found = true
-		}
-		// The search flag turns all targets into search queries.
-		if opt.FlagOn('s') {
-			disable_sync = true
-		}
-		if opt.TakesParam() {
-			// The current option takes an argument, do not treat the next argument
-			// as a target package name.
-			i++
-		}
+	waitmsg, err := cmd.Wait(0)
+	if err != nil {
+		return "", NewFetchError(pkgname, err.String())
 	}
 	
-	if sync_found && ! disable_sync {
-		return targets
+	if code := waitmsg.ExitStatus(); code != 0 {
+		errline := pf.readLine(cmd.Stderr)
+		if errline == "error: target not found: " + pkgname {
+			return "", NotFoundError(pkgname)
+		}
+		return "", NewFetchError(pkgname, "pacman " + errline)
 	}
-	return []string{}
+	
+	// TODO: make sure it is a url
+	url := pf.readLine(cmd.Stdout)
+	return url, nil
+}
+
+func (pf *PacmanFetcher) Fetch(pkgname string) ([]string, *FetchError) {
+	urltext, err := pf.findPackageUrl(pkgname)
+	if err != nil {
+		return nil, err
+	}
+	
+	pkgpath, oserr := pf.downloadPackage(urltext)
+	if oserr != nil {
+		return nil, NewFetchError(pkgname, oserr.String())
+	}
+	
+	return []string{pkgpath}, nil
+}
+
+func (pf *PacmanFetcher) downloadPackage(urltext string) (string, os.Error) {
+	url, err := http.ParseURL(urltext)
+	if err != nil {
+		return "", err
+	}
+	
+	req, err := http.NewRequest("GET", url.String(), nil)
+	if err != nil {
+		return "", err
+	}
+	
+	req.UserAgent = MAW_USERAGENT
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+	
+	if resp.StatusCode != 200 {
+		return "", os.NewError("Download of "+urltext+" failed: HTTP "+resp.Status)
+	}
+	
+	_, filename := path.Split(url.Path)
+	destpath := path.Join(pf.pkgdest, filename)
+	destfile, err := os.Create(destpath)
+	if err != nil {
+		return "", err
+	}
+	defer destfile.Close()
+	
+	if resp.ContentLength < 0 {
+		_, err = io.Copy(destfile, resp.Body)
+	} else {
+		_, err = io.Copyn(destfile, resp.Body, resp.ContentLength)
+	}
+	if err != nil {
+		return "", err
+	}
+	
+	return destpath, nil
 }
