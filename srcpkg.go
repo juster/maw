@@ -294,5 +294,5 @@ ResultLoop:
 		}
 	}
 
-	return nil, os.NewError("readFileLines failed")
+	return pkgpaths, nil
 }
