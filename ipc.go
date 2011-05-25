@@ -1,14 +1,14 @@
 /* 	ipc.go
 
-	When maw is invoked it is either invoked as a parent ("server") or child ("client") process.
+	When maw is invoked runs as a master or slave process.
 	
-	The server process is what is activated by default, by the user. This starts the server and
-	at least one client process. The client processes are spawned my maw itself. Or actually,
-	spawned by makepkg. Maw calls makepkg, specifying PACMAN=maw in order to have
-	makepkg use maw -Ss for syncing AUR deps that it needs. The child processes communicate
-	back to the original server process by using a file descriptor that is passed through makepkg.
+	The master process is what is activated by default, by the user. This starts the master and
+	at least one slave process. The slave processes are spawned by makepkg. Maw calls makepkg,
+	specifying PACMAN=maw in order to have makepkg use maw -Ss for syncing AUR deps that
+	it needs. The child processes communicate back to the original server process by using a file
+	descriptor that is passed through makepkg.
 	
-	This keeps all user interaction in the "server" or "parent". This is the original spawned process.
+	This keeps all user interaction in the master. This is the original spawned process.
 	This also prevents multiple versions of pacman trying to install at the same time... and failing
 	horribly. The only process installing packages is the original parent process.
 	
@@ -21,12 +21,9 @@ package main
 import (
 	"io"
 	"os"
-	"os/signal"
 	"fmt"
 	"bufio"
-	"strings"
 	"strconv"
-	"syscall"
 	"regexp"
 )
 
@@ -35,25 +32,15 @@ const (
 )
 
 var (
-	msgMatch = regexp.MustCompile("^([0-9]+):([^:]+):(.*)$")
+	msgMatch = regexp.MustCompile("^([0-9]+):([^:]+):([^:]+):(.*)$")
 )
 
-// Messages can only be sent from child to parent.
+// Messages can only be sent from slave processes to the master process.
 type Message struct {
-	ChildPid int
+	Pid int
+	Key string
 	Action string
-	Params []string
-}
-
-// NewMessage gets a new message ready to send. Should only be used by child processes.
-func NewMessage(act string, params ... string) (*Message) {
-	pid := os.Getpid()
-	return &Message{pid, act, params}
-}
-
-func (msg *Message) String() (string) {
-	act := strings.ToUpper(msg.Action)
-	return fmt.Sprintf("%d:%s:%s\n", msg.ChildPid, act, msg.Params)
+	Param string
 }
 
 type MessageReader struct {
@@ -66,7 +53,7 @@ func NewMessageReader(reader io.Reader) (*MessageReader) {
 }
 
 func (mmr *MessageReader) ReadNext() (*Message, os.Error) {
-	line, prefix, err := mmr.linerdr.ReadLine()
+	buff, prefix, err := mmr.linerdr.ReadLine()
 	switch {
 	case err != nil:
 		return nil, err
@@ -74,127 +61,36 @@ func (mmr *MessageReader) ReadNext() (*Message, os.Error) {
 		return nil, os.NewError("Line buffer read an extremely long line, possibly corrupt message.")
 	}
 
-	matches := msgMatch.FindSubmatch(line)
+	line := string(buff)
+	matches := msgMatch.FindStringSubmatch(line)
 	if matches == nil {
 		return nil, os.NewError("Failed to parse IPC message: " + string(line))
 	}
-	if L := len(matches); L == 0 || L > 2 {
+	if L := len(matches); L == 0 || L > 3 {
 		return nil, os.NewError("Failed to parse IPC message: " + string(line))
 	}
-	
-	var pid int
-	var act string
-	var params []string
-	
-	for i, elem := range matches {
-		str := string(elem)
-		
-		switch i {
-		case 0: pid, _ = strconv.Atoi(str)
-		case 1: act = str
-		case 2: params = strings.Split(str, " ", -1)
-		}
-	}
-	
-	return &Message{pid, act, params}, nil
-}
 
-type MessageRPC func (int, ... string)
-
-type InstallProc struct {
-	childrenIds []int
-	msgReader *MessageReader
-	dispatchTable map[string] MessageRPC
-}
-
-// NewInstallProc returns a new InstallProc and the writer end of the pipe to pass to children.
-func NewInstallProc() (*InstallProc, *os.File, os.Error) {
-	readpipe, writepipe, err := os.Pipe()
+	pid, err := strconv.Atoi(matches[0])
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
-	reader := NewMessageReader(readpipe)
-	
-	parent := &InstallProc{make([]int, 8, 64), reader, nil}
-	dispatch := map[string]MessageRPC{"HAI": func (pid int, _ ... string) { parent.addChild(pid) },
-		"BAI": func (pid int, _ ... string) { parent.remChild(pid) }}
-	parent.dispatchTable = dispatch
-	return parent, writepipe, nil
+
+	return &Message{pid, matches[1], matches[2], matches[3]}, nil
 }
 
-func (proc *InstallProc) StartListening() {
-	msgchan := make(chan *Message, 32)
-	go proc.MessageLoop(msgchan)
-	
-	var msg *Message
-	var sig signal.Signal
-ListenLoop:
-	select {
-	case msg = <- msgchan:
-		f := proc.dispatchTable[msg.Action]
-		if f != nil {
-			f(msg.ChildPid)
-		}
-	case sig = <- signal.Incoming:
-		switch sig.(signal.UnixSignal) {
-		// TODO: make constants
-		case 1: fallthrough
-		case 2: fallthrough
-		case 5: 
-			proc.killChildren(9)
-			break ListenLoop
-		}
-	}
+type MessageWriter struct {
+	pid int
+	secret string
+	pipe *os.File
 }
 
-func (proc *InstallProc) MessageLoop(c chan *Message) {
-	for {
-		msg, err := proc.msgReader.ReadNext()
-		if err != nil {
-			panic(err.String())
-		}
-		c <- msg
-	}
-}
-
-// Start keeping track of a child process and responding to its messages.
-func (proc *InstallProc) addChild(pid int, unused ... string) {
-	for _, oldPid := range proc.childrenIds {
-		if oldPid == pid {
-			return
-		}
-	}
-	proc.childrenIds = append(proc.childrenIds, pid)
-}
-
-// Stop keeping track of a child process. Probably because it exited.
-func (proc *InstallProc) remChild(pid int, unused ... string) (os.Error) {
-	for i, curPid := range proc.childrenIds {
-		if curPid == pid {
-			proc.childrenIds = append(proc.childrenIds[0:i], proc.childrenIds[i+1:] ...)
-			return nil
-		}
-	}
-	return os.NewError(fmt.Sprintf("Could not remove child PID, it is not register: %d", pid))
-}
-
-// KillChildren is a gruesome name isn't it?
-// This is the main reason to keep track of active children. Wait what?
-func (proc *InstallProc) killChildren(sig int) {
-	for _, pid := range proc.childrenIds {
-		syscall.Kill(pid, sig) // ignores errors, we can't do anything about it
-	}
-}
-
-type BuilderProc struct {
-	msgWriter *os.File
-}
-
-func NewBuilderProc() (*BuilderProc) {
+func NewMessageWriter(secret string) (*MessageWriter) {
 	file := os.NewFile(MawPipeFd, "maw-pipe")
-	return &BuilderProc{file}
+	return &MessageWriter{os.Getpid(), secret, file}
 }
 
-func (builder *BuilderProc) SendMessage(msg *Message) {
-	builder.msgWriter.WriteString(msg.String())
+func (writer *MessageWriter) SendMessage(command, arg string) os.Error {
+	_, err := writer.pipe.WriteString(fmt.Sprintf("%d:%s:%s:%s\n",
+		writer.pid, writer.secret, command, arg))
+	return err
 }

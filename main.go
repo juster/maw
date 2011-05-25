@@ -1,6 +1,6 @@
-/* maw.go
- * Makepkg Aur Wrapper - Main program code
- * Justin Davis <jrcd83 at googlemail>
+/* main.go
+ * Makepkg Aur Wrapper - Program entrypoint
+ * Justin Davis <jrcd83 at gmail>
  */
 
 package main
@@ -10,41 +10,99 @@ import (
 	"fmt"
 )
 
-func fetchPackage(c chan []string, fetchers []PackageFetcher, pkgname string) {
-	for _, fetcher := range fetchers {
-		paths, err := fetcher.Fetch(pkgname)
-		if err != nil {
-			if err.NotFound {
+const (
+	MAW_USERAGENT = "maw/1.0"
+	MAW_ENVVAR = " MAWSECRET " // spaces are there so PKGBUILDs can't use it [easily]
+	OptQuery = iota
+	OptRemove = iota
+	OptSync = iota
+	OptDepTest = iota
+	OptHelp = iota
+)
 
-				continue
-			}
-			fmt.Printf("ERROR: %s: %s\n", pkgname, err.String())
-			c <- nil
-			return
+type MawOpt struct {
+	Action int
+	Targets []string
+}
+
+func ParseOpts(cmdopts []string) *MawOpt {
+	if len(cmdopts) == 0 {
+		return &MawOpt{OptHelp, nil}
+	}
+	
+	var act int
+	switch cmdopts[0] {
+	case "-Qq": act = OptQuery
+	case "-Rns": act = OptRemove
+	case "-S": act = OptSync
+	case "-T": act = OptDepTest
+	default: act = OptHelp
+	}
+	
+	// Don't accidentally make flags into target packages,
+	targets := make([]string, 0, len(cmdopts))
+	for _, opt := range cmdopts {
+		if opt[0] != '-' {
+			targets = append(targets, opt)
 		}
-		c <- paths
-		return
+	}
+	
+	return &MawOpt{act, targets}
+}
+
+func startMaster() int {
+	master, err := NewMasterProc()
+	if err != nil {
+		fmt.Printf("Failed to start maw master: %s\n", err.String())
+		return 1
 	}
 
-	fmt.Printf("ERROR: package %s was not found\n", pkgname)
-	c <- nil
+	// Start a slave process with our exact arguments now that a master process
+	// is ready to receive its messages.
+	devnull, err := os.Open(os.DevNull)
+	if err != nil {
+		fmt.Printf("%s\n", err.String())
+		return 1
+	}
+	_, err = master.SpawnSlaveProcess(os.Args, ".", devnull)
+	if err != nil {
+		fmt.Printf("Failed to respawn maw: %s\n", err.String())
+		return 1
+	}
+
+	master.Start()
+	return 0
+}
+
+func startSlave(opt *MawOpt, secret string) int {
+	return 0
+}
+
+func runDepTest(opt *MawOpt) int {
+	return 0
 }
 
 func main() {
-	fetchers := make([]PackageFetcher, 2, 8)
-	fetchers[0] = &AURCache{".", ".", "."}
-	fetchers[1] = &PacmanFetcher{"."}
+	opt := ParseOpts(os.Args)
 
-	pkgchan := make(chan []string, 8)
-	for _, arg := range os.Args[1:] {
-		go fetchPackage(pkgchan, fetchers, arg)
+	// Handle easy operations where we don't have to worry about master/slave processes.
+	switch opt.Action {
+	case OptDepTest:
+		os.Exit(runDepTest(opt))
+	case OptHelp:
+		fmt.Printf("Help help I'm being repressed!\nBloody peasants!\n")
+		os.Exit(0)
 	}
 
-	i := 0
-	for i < len(os.Args)-1 {
-		for _, path := range <- pkgchan {
-			fmt.Printf("package: %s\n", path )
-		}
-		i++
+	var retval int
+	mawsecret := os.Getenv(MAW_ENVVAR)
+	if mawsecret == "" {
+		// If the secret is not defined, maw has not yet started so we start a new
+		// master process.
+		retval = startMaster()
+	} else {
+		retval = startSlave(opt, mawsecret)
 	}
+
+	os.Exit(retval)
 }

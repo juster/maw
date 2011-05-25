@@ -1,38 +1,65 @@
 /*	fetch.go
-	Package fetching.
+	Package fetching interface and package fetching error interface.
 */
 
 package main
 
 import (
 	"fmt"
+	"os"
 )
 
-const (
-	MAW_USERAGENT = "maw/1.0"
-)
-
-type FetchError struct {
-	NotFound bool
-	Query    string
-	Message  string
+type FetchError interface {
+	// returns an error message, like os.Error
+	String() string
+	// returns true if no matching package name could be found
+	NotFound() bool
 }
 
-func (err *FetchError) String() string {
-	if err.NotFound {
-		return fmt.Sprintf("error: target not found %s", err.Query)
+type FetchErrorRaw struct {
+	missing bool
+	query string
+	message string
+}
+
+type FetchErrorWrapper struct {
+	pkgname string
+	oserr os.Error
+}
+
+func (err *FetchErrorRaw) String() string {
+	if err.missing {
+		return fmt.Sprintf("error: target not found %s", err.query)
 	}
-	return err.Message
+	return err.message
 }
 
-func NewFetchError(pkgname string, errmsg string) *FetchError {
-	return &FetchError{false, pkgname, errmsg}
+func (err *FetchErrorRaw) NotFound() bool {
+	return err.missing
 }
 
-func NotFoundError(pkgname string) *FetchError {
-	return &FetchError{true, pkgname, ""}
+func NewFetchError(pkgname string, errmsg string) FetchError {
+	return &FetchErrorRaw{false, pkgname, errmsg}
+}
+
+// NotFoundError creates a FetchError for pkgname which returns true for NotFound()
+func NotFoundError(pkgname string) FetchError {
+	return &FetchErrorRaw{true, pkgname, ""}
+}
+
+// FetchErrorWrap wraps an os.Error into a FetchError
+func FetchErrorWrap(pkgname string, oserr os.Error) FetchError {
+	return &FetchErrorWrapper{pkgname, oserr}
+}
+
+func (wrap *FetchErrorWrapper) String() string {
+	return wrap.oserr.String()
+}
+
+func (wrap *FetchErrorWrapper) NotFound() bool {
+	return false
 }
 
 type PackageFetcher interface {
-	Fetch(pkgname string) ([]string, *FetchError)
+	Fetch(pkgname string) ([]string, FetchError)
 }

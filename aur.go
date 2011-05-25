@@ -18,19 +18,22 @@ const (
 )
 
 type AURCache struct {
-	Pkgdest    string
-	Srcpkgdest string
-	Buildroot  string
+	srcpkgdest, buildroot string
+	builder *PackageBuilder
+}
+
+func NewAURCache(srcdest, buildroot string, builder *PackageBuilder) *AURCache {	
+	return &AURCache{srcdest, buildroot, builder}
 }
 
 func (aur *AURCache) srcPkgPath(pkgname string) string {
-	return fmt.Sprintf("%s/%s.src.tar.gz", aur.Srcpkgdest, pkgname)
+	return fmt.Sprintf("%s/%s.src.tar.gz", aur.srcpkgdest, pkgname)
 }
 
-func (aur *AURCache) Fetch(pkgname string) ([]string, *FetchError) {
+func (aur *AURCache) Fetch(pkgname string) ([]string, FetchError) {
 	path, err := aur.downloadNewer(pkgname)
 	if err != nil {
-		return nil, NewFetchError(pkgname, err.String())
+		return nil, FetchErrorWrap(pkgname, err)
 	}
 	if path == "" {
 		return nil, NotFoundError(pkgname)
@@ -38,13 +41,18 @@ func (aur *AURCache) Fetch(pkgname string) ([]string, *FetchError) {
 
 	srcpkg, err := OpenSrcPkg(path)
 	if err != nil {
-		return nil, NewFetchError(pkgname, err.String())
+		return nil, FetchErrorWrap(pkgname, err)
 	}
-	fmt.Printf("DBG: Building %s...\n", pkgname)
-	pkgpaths, err := srcpkg.Make(aur.Buildroot)
+
+	srcdir, err := srcpkg.Extract(aur.buildroot)
 	srcpkg.Close()
 	if err != nil {
-		return nil, NewFetchError(pkgname, err.String())
+		return nil, FetchErrorWrap(pkgname, err)
+	}
+
+	pkgpaths, err := aur.builder.Build(srcdir)
+	if err != nil {
+		return nil, FetchErrorWrap(pkgname, err)
 	}
 
 	return pkgpaths, nil

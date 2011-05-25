@@ -17,8 +17,8 @@ import (
 
 const (
 	ThreeDigits = "([0-9]+)"
-	AddrRegexp = ThreeDigits + "," + ThreeDigits + "," + ThreeDigits + "," + ThreeDigits + "," +
-		ThreeDigits + "," + ThreeDigits
+	AddrRegexp = ThreeDigits + "," + ThreeDigits + "," + ThreeDigits + "," +
+		ThreeDigits + "," + ThreeDigits + "," + ThreeDigits
 	AnonPasswd = "maw@juster.us"
 	PreLogin = iota
 	LoggedIn = iota
@@ -47,7 +47,8 @@ func (ftp *FtpConn) expectResp(expectedCode int) (string, os.Error) {
 	for {
 		code, msg, err := ftp.p.ReadResponse(expectedCode)
 	
-		// This code is sent whenever the data connection is closed (i.e. file is finished downloading)
+		// This code is sent whenever the data connection is closed
+		// (i.e. file is finished downloading)
 		if code == 226 {
 			if ftp.pendingTransfers > 0 {
 				// Loop and read the response again

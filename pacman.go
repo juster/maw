@@ -24,17 +24,18 @@ func (pf *PacmanFetcher) readLine(readhandle io.Reader) (string) {
 	return string(line)
 }
 
-func (pf *PacmanFetcher) findPackageUrl(pkgname string) (string, *FetchError) {
-	cmd, err := exec.Run("/usr/bin/pacman", []string{"pacman", "-S", "--print", pkgname}, nil, "",
+func (pf *PacmanFetcher) findPackageUrl(pkgname string) (string, FetchError) {
+	args := []string{"pacman", "-S", "--print", pkgname}
+	cmd, err := exec.Run("/usr/bin/pacman", args, nil, "",
 		exec.DevNull, exec.Pipe, exec.Pipe)
 	if err != nil {
-		return "", NewFetchError(pkgname, err.String())
+		return "", FetchErrorWrap(pkgname, err)
 	}
 	defer cmd.Close()
 	
 	waitmsg, err := cmd.Wait(0)
 	if err != nil {
-		return "", NewFetchError(pkgname, err.String())
+		return "", FetchErrorWrap(pkgname, err)
 	}
 	
 	if code := waitmsg.ExitStatus(); code != 0 {
@@ -50,7 +51,7 @@ func (pf *PacmanFetcher) findPackageUrl(pkgname string) (string, *FetchError) {
 	return url, nil
 }
 
-func (pf *PacmanFetcher) Fetch(pkgname string) ([]string, *FetchError) {
+func (pf *PacmanFetcher) Fetch(pkgname string) ([]string, FetchError) {
 	urltext, err := pf.findPackageUrl(pkgname)
 	if err != nil {
 		return nil, err
@@ -58,7 +59,7 @@ func (pf *PacmanFetcher) Fetch(pkgname string) ([]string, *FetchError) {
 	
 	url, oserr := http.ParseURL(urltext)
 	if oserr != nil {
-		return nil, NewFetchError(pkgname, oserr.String())
+		return nil, FetchErrorWrap(pkgname, oserr)
 	}
 	
 	var pkgpath string
@@ -74,7 +75,7 @@ func (pf *PacmanFetcher) Fetch(pkgname string) ([]string, *FetchError) {
 	}
 
 	if oserr != nil {
-		return nil, NewFetchError(pkgname, oserr.String())
+		return nil, FetchErrorWrap(pkgname, oserr)
 	}
 	
 	return []string{pkgpath}, nil

@@ -1,3 +1,10 @@
+/*	srcpkg.go
+	Contains the SrcPkg class and PackageBuilder class. SrcPkgs represent, hey
+	guess what, source package files. The main purpose of the class is to
+	extract the source package into a source directory. The PackageBuilder
+	takes this source directory and, you guessed it, builds a binary package.
+*/
+
 package main
 
 import (
@@ -6,7 +13,6 @@ import (
 	"fmt"
 	"time"
 	"path"
-	"path/filepath"
 	"bufio"
 	"strings"
 	"syscall"
@@ -44,7 +50,8 @@ func (srcpkg *SrcPkg) Close() {
 	srcpkg.file.Close()
 }
 
-// PackageName extracts the name of the package from the path of the source package tarball.
+// PackageName extracts the name of the package from the path of the source package
+// tarball.
 func (srcpkg *SrcPkg) PackageName() (string, os.Error) {
 	filename := path.Base(srcpkg.path)
 	endidx := strings.Index(filename, ".")
@@ -55,11 +62,17 @@ func (srcpkg *SrcPkg) PackageName() (string, os.Error) {
 	return pkgname, nil
 }
 
-// Extract extracts the source directory from the SrcPkg into the specified directory.
-func (srcpkg *SrcPkg) Extract(destdir string) (*SrcDir, os.Error) {
+// Extract extracts the source directory from the SrcPkg into the specified
+// destination directory.
+//
+// str1ng's goarchive (https://github.com/str1ngs/goarchive) was used as a
+// starting point for this code and associated functions.
+//
+// TODO: do package checking first, maybe with a Check method.
+func (srcpkg *SrcPkg) Extract(destdir string) (string, os.Error) {
 	dirname, err := srcpkg.PackageName()
 	if err != nil {
-		return nil, err
+		return "", err
 	}
 
 	oldmask := syscall.Umask(0033)
@@ -73,35 +86,37 @@ func (srcpkg *SrcPkg) Extract(destdir string) (*SrcDir, os.Error) {
 			break
 		}
 		if err != nil {
-			return nil, err
+			return "", err
 		}
 		
 		switch hdr.Typeflag {
 		case tar.TypeDir:
 			if tardir := strings.TrimRight(hdr.Name, "/"); tardir != dirname {
-				return nil, os.NewError("Tarball dir (" + hdr.Name + ") should be " + dirname)
+				msg := "Tarball dir ("+hdr.Name+") should be "+dirname
+				return "", os.NewError(msg)
 			}
 			if err := prepDirectory(destpkgdir); err != nil {
-				return nil, err
+				return "", err
 			}
 		case tar.TypeSymlink, tar.TypeLink:
-			return nil, os.NewError("Links were found inside the source package, aborting.")
+			msg := "Links were found inside the source package, aborting."
+			return "", os.NewError(msg)
 		case tar.TypeReg, tar.TypeRegA:
 			dir, filename := path.Split(hdr.Name)
 			dir = strings.TrimRight(dir, "/")
 			if dir != dirname {
-				errstr := fmt.Sprintf("File (%s) in source package is not contained in the " +
-					"package dir (%s)", hdr.Name, dirname)
-				return nil, os.NewError(errstr)
+				tmp := "File (%s) in source package is not contained "+
+					"in the package dir (%s)"
+				errstr := fmt.Sprintf(tmp, hdr.Name, dirname)
+				return "", os.NewError(errstr)
 			}
-
 			srcpkg.extractFile(path.Join(destpkgdir, filename), hdr)
 		default:
-			return nil, os.NewError("Invalid tar header type: " + string(hdr.Typeflag))
+			return "", os.NewError("Invalid tar header type")
 		}
 	}
 	
-	return OpenSrcDir(destpkgdir)
+	return destpkgdir, nil
 }
 
 // prepDirectory creates a new directory unless one already exists.
@@ -119,6 +134,8 @@ func prepDirectory(newpath string) (os.Error) {
 	return os.Mkdir(newpath, 0755)
 }
 
+// extractFile is a helper function for Extract which extracts a file and
+// matches the new file's mtime and atime to the original archive entry.
 func (srcpkg *SrcPkg) extractFile(newpath string, hdr *tar.Header) os.Error {
 	file, err := os.Create(newpath)
 	if err != nil {
@@ -139,50 +156,84 @@ func (srcpkg *SrcPkg) extractFile(newpath string, hdr *tar.Header) os.Error {
 	return nil
 }
 
-// Make extracts the srcpkg to the buildroot, then builds the binary package using
-// makepkg.
-// PKGDEST should be set before calling this func to force where the binary package will end up.
-// Returns the path to the package files and nil on success; nil and error on failure.
-func (srcpkg *SrcPkg) Make(buildroot string) ([]string, os.Error) {
-	buildpath, err := filepath.Abs(buildroot)
-	if err != nil {
-		return nil, err
-	}
-	srcdir, err := srcpkg.Extract(buildpath)
-	if err != nil {
-		return nil, err
-	}
-	builtpkgs, err := srcdir.makepkg()
-	if err != nil {
-		return nil, err
-	}
-	return builtpkgs, nil
+//////////////////////////////////////////////////////////////////////////////
+
+type PackageBuilder struct {
+	master *MasterProc
 }
 
-type SrcDir struct {
-	builddir string
+func NewPackageBuilder(master *MasterProc) *PackageBuilder {
+	return &PackageBuilder{master}
 }
 
-func OpenSrcDir(path string) (*SrcDir, os.Error) {
-	pathinfo, err := os.Stat(path)
+func isDirectory(dirpath string) bool {
+	pathinfo, err := os.Stat(dirpath)
+	if err != nil || ! pathinfo.IsDirectory() {
+		return false
+	}
+	return true
+}
+
+// Build runs makepkg on the specified srcdir. A slice of package paths are
+// returned. These are the paths to the binary packages that are built. Packages
+// with multiple pkgnames build multiple packages, hence the use of a slice.
+// If an error occurs, returns nil and the error.
+//
+// Notice that we do not actually set PKGDEST ourselves, this should be done
+// before calling this function. Otherwise the built package will just end up
+// in the package source directory. Maybe.
+func (builder *PackageBuilder) Build(srcdir string) ([]string, os.Error) {
+	// Open our logfile before we Chdir.
+	outlog, err := openBuildLog(srcdir)
 	if err != nil {
-		return nil, os.NewError("Failed to read source directory at " + path)
+		return nil, err
 	}
-	if ! pathinfo.IsDirectory() {
-		return nil, os.NewError(path + " is not a valid source directory")
+	defer outlog.Close()
+
+	bashcode, tmpfile, err := bashHack()
+	if err != nil {
+		return nil, err
 	}
-	return &SrcDir{path}, nil
+	defer func () {
+		tmpname := tmpfile.Name()
+		tmpfile.Close()
+		os.Remove(tmpname)
+	}()
+
+	// Arguments after "-c" "..." override positional arguments $0, $1, ...
+	cmd := []string{"/bin/bash", "-c", bashcode, "makepkg", "-m", "-f"}
+
+	// We use StartSlaveProcess from main.go to embed a pipe the connects to our
+	// master process. PKGDEST and MAWSECRET env variables should already be set
+	proc, err := builder.master.SpawnSlaveProcess(cmd, srcdir, outlog)
+	if err != nil {
+		return nil, err
+	}
+	defer proc.Release()
+	status, err := proc.Wait(0)
+	if err != nil {
+		return nil, err
+	}
+	if code := status.ExitStatus(); code != 0 {
+		return nil, os.NewError("makepkg failed")
+	}
+
+	return readFileLines(tmpfile)
 }
 
 func openBuildLog(builddir string) (*os.File, os.Error) {
 	tm := time.LocalTime()
 	suffidx, suffix := 1, ""
 	for {
-		fname := fmt.Sprintf("mawbuild-%02d%02d%s.log", tm.Month, tm.Day, suffix)
+		fname := fmt.Sprintf("mawbuild-%02d%02d%s.log",
+			tm.Month, tm.Day, suffix)
 		fqp := path.Join(builddir, fname)
-		switch f, err := os.OpenFile(fqp, os.O_CREATE | os.O_WRONLY | os.O_EXCL, 0644); {
-		case err == nil: return f, nil
-		case err.(*os.PathError).Error.String() != "file exists": return nil, err
+		f, err := os.OpenFile(fqp, os.O_CREATE|os.O_WRONLY|os.O_EXCL, 0644);
+		switch {
+		case err == nil:
+			return f, nil
+		case err.(*os.PathError).Error.String() != "file exists":
+			return nil, err
 		}
 		
 		suffidx++
@@ -221,60 +272,14 @@ source makepkg
 	return bash, tmpfile, nil
 }
 
-// makepkg runs makepkg on the specified builddir. The resulting package is
-// searched for in destdir. Notice we do not actually set PKGDEST ourselves, this
-// should be done before calling this function.
-// Returns the paths of built packages or nil and error if makepkg fails.
-func (srcdir *SrcDir) makepkg() ([]string, os.Error) {
-	// Open our logfile before we Chdir.
-	outlog, err := openBuildLog(srcdir.builddir)
-	if err != nil {
-		return nil, err
-	}
-	defer outlog.Close()
-
-	bashcode, tmpfile, err := bashHack()
-	if err != nil {
-		return nil, err
-	}
-	defer func () {
-		tmpname := tmpfile.Name()
-		tmpfile.Close()
-		os.Remove(tmpname)
-	}()
-
-	// We must force $0 to be makepkg... makepkg runs $0 internally.
-	// Arguments after "-c" "..." override positional arguments $0, $1, ...
-	args := []string{"bash", "-c", bashcode, "makepkg", "-m", "-f"}
-
-	// Prepare to rock makepkg's world!
-	files := []*os.File{nil, outlog, outlog}
-	attr := &os.ProcAttr{srcdir.builddir, nil, files}
-
-	// Start it up and wait for it to finish.
-	proc, err := os.StartProcess("/bin/bash", args, attr)
-	if err != nil {
-		return nil, err
-	}
-	defer proc.Release()
-	status, err := proc.Wait(0)
-	if err != nil {
-		return nil, err
-	}
-	if code := status.ExitStatus(); code != 0 {
-		return nil, os.NewError("makepkg failed")
-	}
-
+func readFileLines(f *os.File) ([]string, os.Error) {
 	// Read our sneaky tempfile. It contains the names of package files
 	// that were built by makepkg.
 	pkgpaths := make([]string, 0, 32)
-	if err != nil {
-		return nil, err
-	}
 
 	// Use bufio to read one line/path at a time.
-	reader := bufio.NewReader(tmpfile)
-RESULTLOOP:
+	reader := bufio.NewReader(f)
+ResultLoop:
 	for {
 		line, prefix, err := reader.ReadLine()
 		switch {
@@ -283,11 +288,11 @@ RESULTLOOP:
 		case prefix:
 			return nil, os.NewError("Extremely long line for package path")
 		case err == os.EOF:
-			break RESULTLOOP
+			break ResultLoop
 		case err != nil:
 			return nil, err
 		}
 	}
 
-	return pkgpaths, nil
+	return nil, os.NewError("readFileLines failed")
 }
