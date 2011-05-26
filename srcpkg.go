@@ -159,11 +159,11 @@ func (srcpkg *SrcPkg) extractFile(newpath string, hdr *tar.Header) os.Error {
 //////////////////////////////////////////////////////////////////////////////
 
 type PackageBuilder struct {
-	master *MasterProc
+	spawner SlaveSpawner
 }
 
-func NewPackageBuilder(master *MasterProc) *PackageBuilder {
-	return &PackageBuilder{master}
+func NewPackageBuilder(spawner SlaveSpawner) *PackageBuilder {
+	return &PackageBuilder{spawner}
 }
 
 func isDirectory(dirpath string) bool {
@@ -205,7 +205,7 @@ func (builder *PackageBuilder) Build(srcdir string) ([]string, os.Error) {
 
 	// We use StartSlaveProcess from main.go to embed a pipe the connects to our
 	// master process. PKGDEST and MAWSECRET env variables should already be set
-	proc, err := builder.master.SpawnSlaveProcess(cmd, srcdir, outlog)
+	proc, err := builder.spawner.SpawnSlaveProcess(cmd, srcdir, outlog)
 	if err != nil {
 		return nil, err
 	}

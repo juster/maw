@@ -33,6 +33,10 @@ type UIEvent struct {
 	Param string
 }
 
+type SlaveSpawner interface {
+	SpawnSlaveProcess(cmd []string, wdir string, outfile *os.File) (*os.Process, os.Error)
+}
+
 type MasterProc struct {
 	key string
 	slavePids []int
