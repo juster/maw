@@ -190,15 +190,17 @@ func (builder *PackageBuilder) Build(srcdir string) ([]string, os.Error) {
 	}
 	defer outlog.Close()
 
-	bashcode, tmpfile, err := bashHack()
+	// Create a tempfile and hook it into our bash tom foolery.
+	tmpfile, err := ioutil.TempFile("", "maw")
 	if err != nil {
 		return nil, err
 	}
+	tmppath := tmpfile.Name()
 	defer func () {
-		tmpname := tmpfile.Name()
 		tmpfile.Close()
-		os.Remove(tmpname)
+		os.Remove(tmppath)
 	}()
+	bashcode := bashHack(tmppath)
 
 	// Arguments after "-c" "..." override positional arguments $0, $1, ...
 	cmd := []string{"/bin/bash", "-c", bashcode, "makepkg", "-m", "-f"}
@@ -247,13 +249,8 @@ func openBuildLog(builddir string) (*os.File, os.Error) {
 // will then print out the paths of the packages that it just created to
 // the temporary filename we choose.
 // Returns the bash code and temporary file name.
-func bashHack() (string, *os.File, os.Error) {
-	tmpfile, err := ioutil.TempFile("", "maw")
-	if err != nil {
-		return "", nil, err
-	}
-
-	bash := `
+func bashHack(tmppath string) string {
+	return `
 exit () {
   if [ "$1" -ne 0 ] ; then command exit $1 ; fi
   fullver=$(get_full_version $epoch $pkgver $pkgrel)
@@ -261,7 +258,7 @@ exit () {
     for arch in "$CARCH" any ; do
       pkgfile="${PKGDEST}/${pkg}-${fullver}-${arch}${PKGEXT}"
       if [ -f "$pkgfile" ] ; then
-        echo "$pkgfile" >>` + tmpfile.Name() + `
+        echo "$pkgfile" >>` + tmppath + `
       fi
     done
   done
@@ -269,7 +266,6 @@ exit () {
 }
 source makepkg
 `
-	return bash, tmpfile, nil
 }
 
 func readFileLines(f *os.File) ([]string, os.Error) {
