@@ -8,6 +8,7 @@ package main
 import (
 	"os"
 	"fmt"
+	"exec"
 )
 
 const (
@@ -40,8 +41,8 @@ func ParseOpts(cmdopts []string) *MawOpt {
 	}
 	
 	// Don't accidentally make flags into target packages,
-	targets := make([]string, 0, len(cmdopts))
-	for _, opt := range cmdopts {
+	targets := make([]string, 0, len(cmdopts)-1)
+	for _, opt := range cmdopts[1:] {
 		if opt[0] != '-' {
 			targets = append(targets, opt)
 		}
@@ -79,11 +80,33 @@ func startSlave(opt *MawOpt, secret string) int {
 }
 
 func runDepTest(opt *MawOpt) int {
-	return 0
+	if len(opt.Targets) == 0 {
+		return 0
+	}
+	args := make([]string, 0, len(opt.Targets)+2)
+	args = append(args, []string{"pacman", "-T"} ...)
+	args = append(args, opt.Targets ...)
+	
+	cmd, err := exec.Run("/usr/bin/pacman", args, nil, "",
+		exec.DevNull, exec.PassThrough, exec.DevNull)
+	if err != nil {
+		goto DepTestError
+	}
+
+	status, err := cmd.Wait(0)
+	if err != nil {
+		goto DepTestError
+	}
+	return status.ExitStatus()
+
+DepTestError:
+	// Try printing an error even though we might be a slave process.
+	fmt.Fprintf(os.Stderr, "Failed to run pacman: %s\n", err.String())
+	return 1
 }
 
 func main() {
-	opt := ParseOpts(os.Args)
+	opt := ParseOpts(os.Args[1:])
 
 	// Handle easy operations where we don't have to worry about master/slave processes.
 	switch opt.Action {
