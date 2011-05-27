@@ -41,22 +41,24 @@ type MasterProc struct {
 	key string
 	slavePids []int
 	msgReader *MessageReader
-	readpipe, writepipe *os.File
+	writepipe *os.File
 	eventQueue chan *UIEvent
 	packageFetchers []PackageFetcher
 }
 
 func generateKey() (string, os.Error) {
-	randBytes := make([]byte, 0, 64)
-	count, err := rand.Read(randBytes)
+	randBytes := make([]byte, 16, 16)
+	_, err := rand.Read(randBytes)
 	if err != nil {
 		return "", err
 	}
-	fmt.Printf("DBG: generated %d random bytes\n", count)
 
 	secret := hex.EncodeToString(randBytes)
-	fmt.Printf("DBG: generated key %s\n", secret)
 	return secret, nil
+}
+
+func (proc *MasterProc) Secret() string {
+	return proc.key
 }
 
 // NewMasterProc creates a new MasterProc, generating a random key, a pipe to use
@@ -81,7 +83,7 @@ func NewMasterProc() (*MasterProc, os.Error) {
 	slavePids := make([]int, 0, 128)
 
 	fetchers := []PackageFetcher{&PacmanFetcher{"."}, nil}
-	master := &MasterProc{key, slavePids, reader, readpipe, writepipe, eventQ, fetchers}
+	master := &MasterProc{key, slavePids, reader, writepipe, eventQ, fetchers}
 
 	// The package builder needs a reference to the master proc for spawning slaves.
 	builder := NewPackageBuilder(master)
@@ -93,7 +95,7 @@ func NewMasterProc() (*MasterProc, os.Error) {
 
 func (proc *MasterProc) SpawnSlaveProcess(cmd []string, wdir string, outfile *os.File) (*os.Process, os.Error) {
 	procpath := cmd[0]
-	procargs := cmd[1:]
+	procargs := cmd
 
 	// TODO: dup outfile file descriptors?
 	procfiles := []*os.File{nil, outfile, outfile, proc.writepipe}
@@ -103,10 +105,6 @@ func (proc *MasterProc) SpawnSlaveProcess(cmd []string, wdir string, outfile *os
 }
 
 func (proc *MasterProc) Start() {
-	// Environment variables must be set before we spawn slave processes.
-	os.Setenv(MAW_ENVVAR, proc.key)
-	os.Setenv("PKGDEST", ".") // TODO: fancy this up
-
 	// Messages should be evaluated all the time.
 	go proc.messageLoop()
 
@@ -118,6 +116,9 @@ MainLoop:
 		select {
 		case evt = <- proc.eventQueue:
 			// Events should not be run concurrently.
+			if evt.Type == EventExit {
+				break MainLoop
+			}
 			proc.runEvent(evt)
 		case sig = <- signal.Incoming:
 			switch sig.(signal.UnixSignal) {
@@ -140,8 +141,14 @@ func (proc *MasterProc) messageLoop() {
 			panic(err.String())
 		}
 
+		fmt.Printf("DBG: Received message: %s", msg.String())
+
 		if msg.Key != proc.key {
 			fmt.Printf("DBG: Invalid key sent from %d\n", msg.Pid)
+			continue
+		}
+		if msg.Action == "hello" {
+			proc.addSlave(msg.Pid)
 			continue
 		}
 		if ! proc.checkSlave(msg.Pid) {
@@ -150,14 +157,12 @@ func (proc *MasterProc) messageLoop() {
 		}
 
 		switch msg.Action {
-		case "hello":
-			proc.addSlave(msg.Pid)
 		case "goodbye":
 			proc.remSlave(msg.Pid)
 			if len(proc.slavePids) == 0 {
 				// Send a signal to ourselves to exit.
-				syscall.Kill(os.Getpid(), SIGTERM)
-				break
+				proc.eventQueue <- &UIEvent{0, EventExit, ""}
+				return
 			}
 		case "install":
 			go proc.fetchAll(msg.Pid, msg.Param)
@@ -223,8 +228,9 @@ func (proc *MasterProc) fetchAll(fromPid int, packages string) {
 	for i, c := range chans {
 		pkgpaths := <- c
 		if pkgpaths == nil {
-			// TODO: send the error as an event or signal
-			panic("Could not find the "+pkgnames[i]+" package.")
+			proc.Printf("error: could not find %s\n", pkgnames[i])
+			proc.signalSlave(fromPid, false)
+			return
 		} else {
 			allpkgpaths = append(allpkgpaths, pkgpaths ...)
 		}
@@ -239,20 +245,24 @@ func (proc *MasterProc) fetchAll(fromPid int, packages string) {
 // The resulting package files are sent over the results channel. Since multi-packages can
 // build more than one package file, a slice of strings is sent over the channel.
 func (proc *MasterProc) fetchPackage(pkgname string, results chan []string) {
-	for _, fetcher := range proc.packageFetchers {
-		pkgpaths, err := fetcher.Fetch(pkgname)
-		if err != nil {
-			fmt.Printf(err.String())
-			continue
-		} else if pkgpaths == nil {
-			continue
-		}
+	var pkgpaths []string
 
-		results <- pkgpaths
-		return
+SearchLoop:
+	for _, fetcher := range proc.packageFetchers {
+		var err FetchError
+		pkgpaths, err = fetcher.Fetch(pkgname)
+		if err != nil {
+			if err.NotFound() {
+				continue SearchLoop
+			} else {
+				proc.Printf("error: %s\n", err.String())
+				break SearchLoop
+			}
+		}
 	}
 
-	results <- nil
+	// pkgpaths might be nil
+	results <- pkgpaths
 }
 
 func (proc *MasterProc) runEvent(event *UIEvent) {
@@ -260,6 +270,7 @@ func (proc *MasterProc) runEvent(event *UIEvent) {
 	case EventPrint:
 		fmt.Print(event.Param)
 	case EventPacman:
+		fmt.Printf("DBG: pacman event: %s\n", event.Param)
 		params := strings.Split(event.Param, " ", -1)
 		args := make([]string, 1, len(params)+1)
 		args[0] = "pacman"
@@ -284,8 +295,9 @@ func (proc *MasterProc) runEvent(event *UIEvent) {
 	}
 }
 
-func (proc *MasterProc) Print(msg string) {
+func (proc *MasterProc) Printf(tmp string, params ... interface{}) {
 	// pid is not used when printing messages
+	msg := fmt.Sprintf(tmp, params ...)
 	proc.eventQueue <- &UIEvent{0, EventPrint, msg}
 }
 

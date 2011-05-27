@@ -203,7 +203,7 @@ func (builder *PackageBuilder) Build(srcdir string) ([]string, os.Error) {
 	bashcode := bashHack(tmppath)
 
 	// Arguments after "-c" "..." override positional arguments $0, $1, ...
-	cmd := []string{"/bin/bash", "-c", bashcode, "makepkg", "-m", "-f"}
+	cmd := []string{"/bin/bash", "-c", bashcode, "makepkg", "-s", "-m", "-f"}
 
 	// We use StartSlaveProcess from main.go to embed a pipe the connects to our
 	// master process. PKGDEST and MAWSECRET env variables should already be set

@@ -31,6 +31,7 @@ func (aur *AURCache) srcPkgPath(pkgname string) string {
 }
 
 func (aur *AURCache) Fetch(pkgname string) ([]string, FetchError) {
+	fmt.Printf("DBG: fetching %s from AUR\n", pkgname)
 	path, err := aur.downloadNewer(pkgname)
 	if err != nil {
 		return nil, FetchErrorWrap(pkgname, err)

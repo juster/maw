@@ -1,7 +1,7 @@
-/* main.go
- * Makepkg Aur Wrapper - Program entrypoint
- * Justin Davis <jrcd83 at gmail>
- */
+/*	main.go
+	Makepkg Aur Wrapper - Program entrypoint
+	Justin Davis <jrcd83 at gmail>
+*/
 
 package main
 
@@ -9,6 +9,9 @@ import (
 	"os"
 	"fmt"
 	"exec"
+	"strings"
+	"regexp"
+	"os/signal"
 )
 
 const (
@@ -58,6 +61,13 @@ func startMaster() int {
 		return 1
 	}
 
+	// Environment variables must be set before we spawn slave processes.
+	os.Setenv(MAW_ENVVAR, master.Secret())
+	os.Setenv("PKGDEST", ".") // TODO: fancy this up
+	os.Setenv("PACMAN", "maw")
+
+	fmt.Printf("DBG: %s=%s\n", MAW_ENVVAR, os.Getenv(MAW_ENVVAR))
+
 	// Start a slave process with our exact arguments now that a master process
 	// is ready to receive its messages.
 	devnull, err := os.Open(os.DevNull)
@@ -65,18 +75,60 @@ func startMaster() int {
 		fmt.Printf("%s\n", err.String())
 		return 1
 	}
-	_, err = master.SpawnSlaveProcess(os.Args, ".", devnull)
+	fmt.Printf("DBG: starting slave process\n")
+	proc, err := master.SpawnSlaveProcess(os.Args, "", devnull)
 	if err != nil {
 		fmt.Printf("Failed to respawn maw: %s\n", err.String())
 		return 1
 	}
+	fmt.Printf("DBG: slave process started\n")
 
 	master.Start()
+
+	waitstatus, err := proc.Wait(0)
+	if err != nil {
+		return -1
+	}
+	retcode := waitstatus.ExitStatus()
+	if retcode != 0 {
+		return retcode
+	}
 	return 0
 }
 
+func waitSigReply() int {
+	sig := <- signal.Incoming
+	switch sig.(signal.UnixSignal) {
+	case SIGUSR1: return 0
+	case SIGUSR2: return 1
+	}
+
+	return -1
+}
+
 func startSlave(opt *MawOpt, secret string) int {
-	return 0
+	fmt.Printf("DBG: starting slave process\n")
+	msgWriter := NewMessageWriter(secret)
+
+	msgWriter.SendMessage("hello", "")
+	defer msgWriter.SendMessage("goodbye", "")
+
+	var err os.Error
+	targ := strings.Join(opt.Targets, " ")
+
+	switch opt.Action {
+	case OptRemove:
+		err = msgWriter.SendMessage("remove", targ)
+	case OptSync:
+		err = msgWriter.SendMessage("install", targ)
+	default:
+		return 1
+	}
+
+	if err != nil {
+		return -1
+	}
+	return waitSigReply()
 }
 
 func runDepTest(opt *MawOpt) int {

@@ -32,12 +32,12 @@ func (pf *PacmanFetcher) findPackageUrl(pkgname string) (string, FetchError) {
 		return "", FetchErrorWrap(pkgname, err)
 	}
 	defer cmd.Close()
-	
+
 	waitmsg, err := cmd.Wait(0)
 	if err != nil {
 		return "", FetchErrorWrap(pkgname, err)
 	}
-	
+
 	if code := waitmsg.ExitStatus(); code != 0 {
 		errline := pf.readLine(cmd.Stderr)
 		if errline == "error: target not found: " + pkgname {
@@ -45,8 +45,7 @@ func (pf *PacmanFetcher) findPackageUrl(pkgname string) (string, FetchError) {
 		}
 		return "", NewFetchError(pkgname, "pacman " + errline)
 	}
-	
-	// TODO: make sure it is a url
+
 	url := pf.readLine(cmd.Stdout)
 	return url, nil
 }

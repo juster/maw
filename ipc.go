@@ -11,9 +11,6 @@
 	This keeps all user interaction in the master. This is the original spawned process.
 	This also prevents multiple versions of pacman trying to install at the same time... and failing
 	horribly. The only process installing packages is the original parent process.
-	
-	Packages are built by child processes. Because they are not installing packages their
-	priviledges can also be dropped immediately to a non-root user.
 */
 
 package main
@@ -43,6 +40,10 @@ type Message struct {
 	Param string
 }
 
+func (msg *Message) String() string {
+	return fmt.Sprintf("%d:%s:%s:%s\n", msg.Pid, msg.Key, msg.Action, msg.Param)
+}
+
 type MessageReader struct {
 	linerdr *bufio.Reader
 }
@@ -66,16 +67,16 @@ func (mmr *MessageReader) ReadNext() (*Message, os.Error) {
 	if matches == nil {
 		return nil, os.NewError("Failed to parse IPC message: " + string(line))
 	}
-	if L := len(matches); L == 0 || L > 3 {
+	if L := len(matches); L == 0 || L > 5 {
 		return nil, os.NewError("Failed to parse IPC message: " + string(line))
 	}
 
-	pid, err := strconv.Atoi(matches[0])
+	pid, err := strconv.Atoi(matches[1])
 	if err != nil {
 		return nil, err
 	}
 
-	return &Message{pid, matches[1], matches[2], matches[3]}, nil
+	return &Message{pid, matches[2], matches[3], matches[4]}, nil
 }
 
 type MessageWriter struct {
@@ -85,12 +86,14 @@ type MessageWriter struct {
 }
 
 func NewMessageWriter(secret string) (*MessageWriter) {
-	file := os.NewFile(MawPipeFd, "maw-pipe")
+	file := os.NewFile(3, "maw-pipe")
 	return &MessageWriter{os.Getpid(), secret, file}
 }
 
 func (writer *MessageWriter) SendMessage(command, arg string) os.Error {
-	_, err := writer.pipe.WriteString(fmt.Sprintf("%d:%s:%s:%s\n",
-		writer.pid, writer.secret, command, arg))
+	msg := fmt.Sprintf("%d:%s:%s:%s\n", writer.pid, writer.secret, command, arg)
+	fmt.Printf("DBG: sending message...\n")
+	_, err := writer.pipe.WriteString(msg)
+	fmt.Printf("DBG: sent %s message\n", msg)
 	return err
 }
