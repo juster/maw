@@ -1,3 +1,5 @@
 maw
 _obj
 *.8
+mawmakepkg
+test
