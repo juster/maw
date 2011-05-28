@@ -1,3 +1,4 @@
+syntax: glob
 maw
 _obj
 *.8
