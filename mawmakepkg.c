@@ -32,7 +32,7 @@
 "}\n" \
 "source makepkg"
 
-/* Look up user entry for the SUDO_USER. */
+/* Look up user entry for the SUDO_USER. If SUDO_USER is not set, then return NULL. */
 struct passwd *
 getSudoUserInfo ()
 {
@@ -41,7 +41,7 @@ getSudoUserInfo ()
     
     sudoUser = getenv("SUDO_USER");
     if (sudoUser == NULL) {
-        error(1, 0, "it does not appear that we are running under sudo, aborting.");
+        return NULL;
     }
     
     userEntry = getpwnam(sudoUser);
@@ -60,8 +60,18 @@ setupBuildEnv()
 {
     struct passwd *pwentry;
     int ret;
-    
+
+    ret = setenv("PACMAN", "maw", 1);
+    if (ret == -1) {
+        error(1, errno, "failed to set PACMAN env. variable.");
+    }
+
     pwentry = getSudoUserInfo();
+    if (pwentry == NULL) {
+        /* We are not running under sudo, I guess, so don't bother trying to drop priveledges. */
+        return;
+    }
+
     ret = setgid(pwentry->pw_gid);
     if (ret == -1) {
         error(1, errno, "failed to set gid to %d for %s user.", pwentry->pw_gid, pwentry->pw_name);
@@ -69,11 +79,6 @@ setupBuildEnv()
     ret = setuid(pwentry->pw_uid);
     if (ret == -1) {
         error(1, errno, "failed to set uid to %d for %s user.", pwentry->pw_uid, pwentry->pw_name);
-    }
-    
-    ret = setenv("PACMAN", "maw", 1);
-    if (ret == -1) {
-        error(1, errno, "failed to set PACMAN env. variable.");
     }
     
     return;
