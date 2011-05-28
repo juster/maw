@@ -9,9 +9,6 @@ import (
 	"os"
 	"fmt"
 	"exec"
-	"strings"
-	"regexp"
-	"os/signal"
 )
 
 const (
@@ -26,15 +23,18 @@ const (
 
 type MawOpt struct {
 	Action int
+	AsDeps bool
 	Targets []string
 }
 
 func ParseOpts(cmdopts []string) *MawOpt {
 	if len(cmdopts) == 0 {
-		return &MawOpt{OptHelp, nil}
+		return &MawOpt{Action:OptHelp}
 	}
 	
 	var act int
+	var asdeps bool
+
 	switch cmdopts[0] {
 	case "-Qq": act = OptQuery
 	case "-Rns": act = OptRemove
@@ -43,141 +43,157 @@ func ParseOpts(cmdopts []string) *MawOpt {
 	default: act = OptHelp
 	}
 	
-	// Don't accidentally make flags into target packages,
+	// Don't accidentally make flags into target packages.
 	targets := make([]string, 0, len(cmdopts)-1)
 	for _, opt := range cmdopts[1:] {
 		if opt[0] != '-' {
 			targets = append(targets, opt)
+		} else if opt == "--asdeps" {
+			asdeps = true
 		}
 	}
 	
-	return &MawOpt{act, targets}
+	return &MawOpt{act, asdeps, targets}
 }
 
-func startMaster() int {
-	master, err := NewMasterProc()
+func runPacman(flag string, args ... string) (int, os.Error) {
+	procargs := make([]string, 2, len(args)+2)
+	procargs[0] = "pacman"
+	procargs[1] = flag
+	procargs = append(procargs, args ...)
+
+	cmd, err := exec.Run("/usr/bin/pacman", procargs, nil, "",
+		exec.PassThrough, exec.PassThrough, exec.PassThrough)
 	if err != nil {
-		fmt.Printf("Failed to start maw master: %s\n", err.String())
-		return 1
+		return 0, err
 	}
 
-	// Environment variables must be set before we spawn slave processes.
-	os.Setenv(MAW_ENVVAR, master.Secret())
-	os.Setenv("PKGDEST", ".") // TODO: fancy this up
-	os.Setenv("PACMAN", "maw")
-
-	fmt.Printf("DBG: %s=%s\n", MAW_ENVVAR, os.Getenv(MAW_ENVVAR))
-
-	// Start a slave process with our exact arguments now that a master process
-	// is ready to receive its messages.
-	devnull, err := os.Open(os.DevNull)
+	waitstatus, err := cmd.Process.Wait(0)
 	if err != nil {
-		fmt.Printf("%s\n", err.String())
-		return 1
-	}
-	fmt.Printf("DBG: starting slave process\n")
-	proc, err := master.SpawnSlaveProcess(os.Args, "", devnull)
-	if err != nil {
-		fmt.Printf("Failed to respawn maw: %s\n", err.String())
-		return 1
-	}
-	fmt.Printf("DBG: slave process started\n")
-
-	master.Start()
-
-	waitstatus, err := proc.Wait(0)
-	if err != nil {
-		return -1
-	}
-	retcode := waitstatus.ExitStatus()
-	if retcode != 0 {
-		return retcode
-	}
-	return 0
-}
-
-func waitSigReply() int {
-	sig := <- signal.Incoming
-	switch sig.(signal.UnixSignal) {
-	case SIGUSR1: return 0
-	case SIGUSR2: return 1
+		return 0, err
 	}
 
-	return -1
-}
-
-func startSlave(opt *MawOpt, secret string) int {
-	fmt.Printf("DBG: starting slave process\n")
-	msgWriter := NewMessageWriter(secret)
-
-	msgWriter.SendMessage("hello", "")
-	defer msgWriter.SendMessage("goodbye", "")
-
-	var err os.Error
-	targ := strings.Join(opt.Targets, " ")
-
-	switch opt.Action {
-	case OptRemove:
-		err = msgWriter.SendMessage("remove", targ)
-	case OptSync:
-		err = msgWriter.SendMessage("install", targ)
-	default:
-		return 1
-	}
-
-	if err != nil {
-		return -1
-	}
-	return waitSigReply()
+	return waitstatus.ExitStatus(), nil
 }
 
 func runDepTest(opt *MawOpt) int {
 	if len(opt.Targets) == 0 {
 		return 0
 	}
-	args := make([]string, 0, len(opt.Targets)+2)
-	args = append(args, []string{"pacman", "-T"} ...)
-	args = append(args, opt.Targets ...)
+
+	code, err := runPacman("-T", opt.Targets...)
+	if err != nil {
+		fmt.Printf("error: %s\n", err.String())
+		return 1
+	}
+
+	return code
+}
+
+////////////////////////////////////////////////////////////////////////////////
+// SYNCING
+
+func fetchAllPackages(pkgnames []string, fetchers []PackageFetcher) ([]string, os.Error) {
+	// Packages are all fetched concurrently, independent of each other
+	chans := make([]chan []string, len(pkgnames))
+	for i, pkgname := range pkgnames {
+		r := make(chan []string, 1)
+		go fetchPackage(pkgname, fetchers, r)
+		chans[i] = r
+	}
+
+	// Waits for all goroutines to finish, collecting results
+	allpkgpaths := make([]string, 0, 256) // TODO: use cap or something
+	for i, c := range chans {
+		pkgpaths := <- c
+		if pkgpaths == nil {
+			return nil, os.NewError("could not find " + pkgnames[i])
+		} else {
+			allpkgpaths = append(allpkgpaths, pkgpaths ...)
+		}
+	}
+
+	return allpkgpaths, nil
+}
+
+// fetchPackage tries to download or build the package file for the package named by pkgname.
+// The resulting package files are sent over the results channel. Since multi-packages can
+// build more than one package file, a slice of strings is sent over the channel.
+func fetchPackage(pkgname string, fetchers []PackageFetcher, results chan []string) {
+	var pkgpaths []string
+
+SearchLoop:
+	for _, fetcher := range fetchers {
+		var err FetchError
+		pkgpaths, err = fetcher.Fetch(pkgname)
+		if err != nil {
+			if err.NotFound() {
+				continue SearchLoop
+			} else {
+				fmt.Printf("error: %s\n", err.String())
+				break SearchLoop
+				// pkgpaths is now nil
+			}
+		}
+	}
+
+	results <- pkgpaths
+}
+
+func installPkgFiles(pkgpaths []string, asdeps bool) int {
+	var args []string
+	if asdeps {
+		args = make([]string, 1, len(pkgpaths)+1)
+		args[0] = "--asdeps"
+		args = append(args, pkgpaths ...)
+	} else {
+		args = pkgpaths
+	}
+
+	code, err := runPacman("-U", pkgpaths ...)
+	if err != nil {
+		fmt.Printf("error: %s\n", err.String())
+		return 1
+	}
+
+	return code
+}
+
+func runSyncInstall(opt *MawOpt) int {
+	// Binary packages and source packages end up in /tmp
+	os.Setenv("PKGDEST", "/tmp")
 	
-	cmd, err := exec.Run("/usr/bin/pacman", args, nil, "",
-		exec.DevNull, exec.PassThrough, exec.DevNull)
-	if err != nil {
-		goto DepTestError
+	builder := &PackageBuilder{}
+	aurCache := NewAURCache("/tmp", ".", builder)
+	fetchers := []PackageFetcher{&PacmanFetcher{"/tmp"}, aurCache}
+	
+	if len(opt.Targets) == 0 {
+		fmt.Printf("error: no targets specified (use -h for help)\n")
 	}
-
-	status, err := cmd.Wait(0)
+	
+	pkgpaths, err := fetchAllPackages(opt.Targets, fetchers)
 	if err != nil {
-		goto DepTestError
+		fmt.Printf("error: %s\n", err.String())
+		return 1
 	}
-	return status.ExitStatus()
-
-DepTestError:
-	// Try printing an error even though we might be a slave process.
-	fmt.Fprintf(os.Stderr, "Failed to run pacman: %s\n", err.String())
-	return 1
+	
+	return installPkgFiles(pkgpaths, opt.AsDeps)
 }
 
 func main() {
 	opt := ParseOpts(os.Args[1:])
 
-	// Handle easy operations where we don't have to worry about master/slave processes.
 	switch opt.Action {
-	case OptDepTest:
-		os.Exit(runDepTest(opt))
 	case OptHelp:
 		fmt.Printf("Help help I'm being repressed!\nBloody peasants!\n")
 		os.Exit(0)
+	case OptDepTest:
+		retcode := runDepTest(opt)
+		os.Exit(retcode)
+	case OptSync:
+		retcode := runSyncInstall(opt)
+		os.Exit(retcode)
 	}
 
-	var retval int
-	mawsecret := os.Getenv(MAW_ENVVAR)
-	if mawsecret == "" {
-		// If the secret is not defined, maw has not yet started so we start a new
-		// master process.
-		retval = startMaster()
-	} else {
-		retval = startSlave(opt, mawsecret)
-	}
-
-	os.Exit(retval)
+	os.Exit(0)
 }

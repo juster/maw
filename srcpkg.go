@@ -11,11 +11,12 @@ import (
 	"io"
 	"os"
 	"fmt"
-	"time"
 	"path"
+	"exec"
 	"bufio"
 	"strings"
 	"syscall"
+	"os/user"
 	"io/ioutil"
 	"archive/tar"
 	"compress/gzip"
@@ -159,11 +160,11 @@ func (srcpkg *SrcPkg) extractFile(newpath string, hdr *tar.Header) os.Error {
 //////////////////////////////////////////////////////////////////////////////
 
 type PackageBuilder struct {
-	spawner SlaveSpawner
+	customLevel int //unimplemented
 }
 
-func NewPackageBuilder(spawner SlaveSpawner) *PackageBuilder {
-	return &PackageBuilder{spawner}
+func NewPackageBuilder() *PackageBuilder {
+	return &PackageBuilder{}
 }
 
 func isDirectory(dirpath string) bool {
@@ -183,98 +184,75 @@ func isDirectory(dirpath string) bool {
 // before calling this function. Otherwise the built package will just end up
 // in the package source directory. Maybe.
 func (builder *PackageBuilder) Build(srcdir string) ([]string, os.Error) {
-	// Open our logfile before we Chdir.
-	outlog, err := openBuildLog(srcdir)
+	// Create a tempfile and hook it into our bash tomfoolery.
+	pathfile, err := NewPkgPathFile()
 	if err != nil {
 		return nil, err
 	}
-	defer outlog.Close()
+	defer pathfile.Cleanup()
 
-	// Create a tempfile and hook it into our bash tom foolery.
+	// Call our included utility, mawmakepkg which wraps makepkg to drop priveledges
+	// and print the paths of built packages to our tempfile.
+	args := []string{"mawmakepkg", pathfile.Name(), "-s", "-m", "-f"}
+	cmd, err := exec.Run("/home/juster/code/maw/mawmakepkg", args, nil, srcdir,
+		exec.PassThrough, exec.PassThrough, exec.PassThrough)
+	if err != nil {
+		return nil, err
+	}
+	defer cmd.Process.Release()
+
+	waitmsg, err := cmd.Wait(0)
+	if code := waitmsg.ExitStatus(); code != 0 {
+		return nil, os.NewError("makepkg failed")
+	}
+
+	return pathfile.ReadLines()
+}
+
+type PkgPathFile struct {
+	file *os.File
+	path string
+}
+
+func NewPkgPathFile() (*PkgPathFile, os.Error) {
 	tmpfile, err := ioutil.TempFile("", "maw")
 	if err != nil {
 		return nil, err
 	}
-	tmppath := tmpfile.Name()
-	defer func () {
-		tmpfile.Close()
-		os.Remove(tmppath)
-	}()
-	bashcode := bashHack(tmppath)
+	pathfile := &PkgPathFile{tmpfile, tmpfile.Name()}
 
-	// Arguments after "-c" "..." override positional arguments $0, $1, ...
-	cmd := []string{"/bin/bash", "-c", bashcode, "makepkg", "-s", "-m", "-f"}
-
-	// We use StartSlaveProcess from main.go to embed a pipe the connects to our
-	// master process. PKGDEST and MAWSECRET env variables should already be set
-	proc, err := builder.spawner.SpawnSlaveProcess(cmd, srcdir, outlog)
+	// If we are running under sudo, we must chmod the tempfile to the user
+	// whom we are going to be dropping privledges to (the SUDO_USER).
+	sudouser := os.Getenv("SUDO_USER")
+	if sudouser == "" {
+		return pathfile, nil
+	}
+	userobj, err := user.Lookup(sudouser)
 	if err != nil {
+		pathfile.Cleanup()
 		return nil, err
 	}
-	defer proc.Release()
-	status, err := proc.Wait(0)
-	if err != nil {
-		return nil, err
-	}
-	if code := status.ExitStatus(); code != 0 {
-		return nil, os.NewError("makepkg failed")
-	}
+	tmpfile.Chown(userobj.Uid, userobj.Gid)
 
-	return readFileLines(tmpfile)
+	return pathfile, nil
 }
 
-func openBuildLog(builddir string) (*os.File, os.Error) {
-	tm := time.LocalTime()
-	suffidx, suffix := 1, ""
-	for {
-		fname := fmt.Sprintf("mawbuild-%02d%02d%s.log",
-			tm.Month, tm.Day, suffix)
-		fqp := path.Join(builddir, fname)
-		f, err := os.OpenFile(fqp, os.O_CREATE|os.O_WRONLY|os.O_EXCL, 0644);
-		switch {
-		case err == nil:
-			return f, nil
-		case err.(*os.PathError).Error.String() != "file exists":
-			return nil, err
-		}
-		
-		suffidx++
-		suffix = fmt.Sprintf("-%d", suffidx)
-	}
-	return nil, os.NewError("Internal error: openBuildLog failed")
+func (ppfile *PkgPathFile) Name() string {
+	return ppfile.file.Name()
 }
 
-// Muahahaha!
-// This creates the bash code we use to hook into makepkg. Makepkg
-// will then print out the paths of the packages that it just created to
-// the temporary filename we choose.
-// Returns the bash code and temporary file name.
-func bashHack(tmppath string) string {
-	return `
-exit () {
-  if [ "$1" -ne 0 ] ; then command exit $1 ; fi
-  fullver=$(get_full_version $epoch $pkgver $pkgrel)
-  for pkg in ${pkgname[@]} ; do
-    for arch in "$CARCH" any ; do
-      pkgfile="${PKGDEST}/${pkg}-${fullver}-${arch}${PKGEXT}"
-      if [ -f "$pkgfile" ] ; then
-        echo "$pkgfile" >>` + tmppath + `
-      fi
-    done
-  done
-  command exit 0
-}
-source makepkg
-`
+func (ppfile *PkgPathFile) Cleanup() {
+	ppfile.file.Close()
+	os.Remove(ppfile.path)
 }
 
-func readFileLines(f *os.File) ([]string, os.Error) {
+func (ppfile *PkgPathFile) ReadLines() ([]string, os.Error) {
 	// Read our sneaky tempfile. It contains the names of package files
 	// that were built by makepkg.
 	pkgpaths := make([]string, 0, 32)
 
 	// Use bufio to read one line/path at a time.
-	reader := bufio.NewReader(f)
+	reader := bufio.NewReader(ppfile.file)
 ResultLoop:
 	for {
 		line, prefix, err := reader.ReadLine()

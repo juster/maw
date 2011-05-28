@@ -1,7 +1,7 @@
 include $(GOROOT)/src/Make.inc
 
 TARG=maw
-GOFILES=main.go master.go ipc.go fetch.go ftp.go pacman.go aur.go srcpkg.go
+GOFILES=main.go fetch.go ftp.go pacman.go aur.go srcpkg.go
 CLEANFILES+=*.gz ./tmp/*
 
 include $(GOROOT)/src/Make.cmd
@@ -11,3 +11,8 @@ install-goarchive:
 
 format:
 	gofmt -w -l *.go
+
+mawmakepkg: mawmakepkg.c
+	gcc -o mawmakepkg mawmakepkg.c
+
+maw: mawmakepkg
