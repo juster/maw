@@ -10,6 +10,7 @@ import (
 	"os"
 	"http"
 	"fmt"
+	"path"
 	"time"
 )
 
@@ -32,17 +33,23 @@ func (aur *AURCache) srcPkgPath(pkgname string) string {
 
 func (aur *AURCache) Fetch(pkgname string) ([]string, FetchError) {
 	fmt.Printf("DBG: fetching %s from AUR\n", pkgname)
-	path, err := aur.downloadNewer(pkgname)
+	srcpath, err := aur.downloadNewer(pkgname)
 	if err != nil {
 		return nil, FetchErrorWrap(pkgname, err)
 	}
-	if path == "" {
+	if srcpath == "" {
 		return nil, NotFoundError(pkgname)
 	}
 
-	srcpkg, err := OpenSrcPkg(path)
+	srcpkg, err := OpenSrcPkg(srcpath)
 	if err != nil {
 		return nil, FetchErrorWrap(pkgname, err)
+	}
+
+	// If we are running under sudo, we do not want our files to be owned by root.
+	sudoUser := lookupSudoUser()
+	if sudoUser != nil {
+		os.Chown(srcpath, sudoUser.Uid, sudoUser.Gid)
 	}
 
 	srcdir, err := srcpkg.Extract(aur.buildroot)
@@ -51,12 +58,32 @@ func (aur *AURCache) Fetch(pkgname string) ([]string, FetchError) {
 		return nil, FetchErrorWrap(pkgname, err)
 	}
 
+	if sudoUser != nil {
+		chownDirRec(srcdir, sudoUser.Uid, sudoUser.Gid)
+	}
+
 	pkgpaths, err := aur.builder.Build(srcdir)
 	if err != nil {
 		return nil, FetchErrorWrap(pkgname, err)
 	}
 
 	return pkgpaths, nil
+}
+
+func chownDirRec(dir string, uid, gid int) {
+	dirh, err := os.Open(dir)
+	if err != nil {
+		return
+	}
+
+	dirh.Chown(uid, gid)
+	names, err := dirh.Readdirnames(-1)
+	if err != nil {
+		return
+	}
+	for _, entry := range names {
+		os.Chown(path.Join(dir, entry), uid, gid)
+	}
 }
 
 // mtimeDateStr converts the file modification time into a date string that HTTP likes.

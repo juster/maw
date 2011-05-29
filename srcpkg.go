@@ -16,7 +16,6 @@ import (
 	"bufio"
 	"strings"
 	"syscall"
-	"os/user"
 	"io/ioutil"
 	"archive/tar"
 	"compress/gzip"
@@ -136,6 +135,8 @@ func prepDirectory(newpath string) (os.Error) {
 	default:
 		return err
 	}
+	oldmask := syscall.Umask(0)
+	defer syscall.Umask(oldmask)
 	return os.Mkdir(newpath, 0755)
 }
 
@@ -227,17 +228,11 @@ func NewPkgPathFile() (*PkgPathFile, os.Error) {
 
 	// If we are running under sudo, we must chmod the tempfile to the user
 	// whom we are going to be dropping privledges to (the SUDO_USER).
-	sudouser := os.Getenv("SUDO_USER")
-	if sudouser == "" {
+	sudouser := lookupSudoUser()
+	if sudouser == nil {
 		return pathfile, nil
 	}
-	userobj, err := user.Lookup(sudouser)
-	if err != nil {
-		pathfile.Cleanup()
-		return nil, err
-	}
-	tmpfile.Chown(userobj.Uid, userobj.Gid)
-
+	tmpfile.Chown(sudouser.Uid, sudouser.Gid)
 	return pathfile, nil
 }
 

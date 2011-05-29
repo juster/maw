@@ -7,6 +7,7 @@ package main
 
 import (
 	"os"
+	"os/user"
 	"fmt"
 	"exec"
 )
@@ -25,6 +26,17 @@ type MawOpt struct {
 	Action int
 	AsDeps bool
 	Targets []string
+}
+
+/* This is used by other files, like in srcpkg.go and aur.go.
+ * Kind of awkward placement but ohwell... */
+func lookupSudoUser() *user.User {
+	sudouser := os.Getenv("SUDO_USER")
+	if sudouser == "" {
+		return nil
+	}
+	userobj, _ := user.Lookup(sudouser)
+	return userobj
 }
 
 func ParseOpts(cmdopts []string) *MawOpt {
