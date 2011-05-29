@@ -135,6 +135,7 @@ SearchLoop:
 				// pkgpaths is now nil
 			}
 		}
+		break
 	}
 
 	results <- pkgpaths
