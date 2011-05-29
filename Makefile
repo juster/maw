@@ -1,18 +1,26 @@
-include $(GOROOT)/src/Make.inc
+ifeq ($(shell uname -m), x86_64)
+  GOC:=6g
+  GOL:=6l
+else
+  GOC:=8g
+  GOL:=8l
+endif
 
-TARG=maw
-GOFILES=main.go fetch.go ftp.go pacman.go aur.go srcpkg.go
-CLEANFILES+=*.gz ./tmp/*
+.PHONY: test all
 
-include $(GOROOT)/src/Make.cmd
+all: maw mawmakepkg
 
-install-goarchive:
-	goinstall -u github.com/str1ngs/goarchive
+maw: main.8
+	$(GOL) -o maw $^
 
-format:
-	gofmt -w -l *.go
+main.8: main.go aur.go fetch.go ftp.go main.go pacman.go srcpkg.go
+
+%.8: %.go
+	$(GOC) $^
 
 mawmakepkg: mawmakepkg.c
 	gcc -o mawmakepkg mawmakepkg.c
 
-maw: mawmakepkg
+install: all
+	install -d -m 755 $(DESTDIR)/usr/bin
+	install -m 755 -t $(DESTDIR)/usr/bin maw mawmakepkg
