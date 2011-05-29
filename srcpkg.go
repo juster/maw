@@ -22,6 +22,10 @@ import (
 	"compress/gzip"
 )
 
+const (
+	MawMakepkgPath = "/usr/bin/mawmakepkg"
+)
+
 type SrcPkg struct {
 	path string
 	file *os.File
@@ -193,8 +197,8 @@ func (builder *PackageBuilder) Build(srcdir string) ([]string, os.Error) {
 
 	// Call our included utility, mawmakepkg which wraps makepkg to drop priveledges
 	// and print the paths of built packages to our tempfile.
-	args := []string{"mawmakepkg", pathfile.Name(), "-s", "-m", "-f"}
-	cmd, err := exec.Run("/home/juster/code/maw/mawmakepkg", args, nil, srcdir,
+	args := []string{MawMakepkgPath, pathfile.Name(), "-s", "-m", "-f"}
+	cmd, err := exec.Run(MawMakepkgPath, args, nil, srcdir,
 		exec.PassThrough, exec.PassThrough, exec.PassThrough)
 	if err != nil {
 		return nil, err
