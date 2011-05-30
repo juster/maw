@@ -52,14 +52,11 @@ func (pf *PacmanFetcher) findPackageUrl(pkgname string) (string, FetchError) {
 }
 
 func (pf *PacmanFetcher) Fetch(pkgname string) ([]string, FetchError) {
-	fmt.Printf("DBG: Fetching %s from Pacman fetcher\n", pkgname)
 	urltext, err := pf.findPackageUrl(pkgname)
 	if err != nil {
 		return nil, err
 	}
 
-	fmt.Printf("DBG: Package url: %s\n", urltext)
-	
 	url, oserr := http.ParseURL(urltext)
 	if oserr != nil {
 		return nil, FetchErrorWrap(pkgname, oserr)
