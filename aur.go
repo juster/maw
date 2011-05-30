@@ -20,10 +20,10 @@ const (
 
 type AURCache struct {
 	srcpkgdest, buildroot string
-	builder *PackageBuilder
+	builder               *PackageBuilder
 }
 
-func NewAURCache(srcdest, buildroot string, builder *PackageBuilder) *AURCache {	
+func NewAURCache(srcdest, buildroot string, builder *PackageBuilder) *AURCache {
 	return &AURCache{srcdest, buildroot, builder}
 }
 

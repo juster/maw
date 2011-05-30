@@ -26,10 +26,10 @@ const (
 )
 
 type SrcPkg struct {
-	path string
-	file *os.File
+	path     string
+	file     *os.File
 	unzipper *gzip.Decompressor
-	reader *tar.Reader
+	reader   *tar.Reader
 }
 
 func OpenSrcPkg(path string) (*SrcPkg, os.Error) {
@@ -37,15 +37,15 @@ func OpenSrcPkg(path string) (*SrcPkg, os.Error) {
 	if err != nil {
 		return nil, err
 	}
-	
+
 	unzipper, err := gzip.NewReader(file)
 	if err != nil {
 		file.Close()
 		return nil, err
 	}
-	
+
 	reader := tar.NewReader(unzipper)
-	
+
 	return &SrcPkg{path, file, unzipper, reader}, nil
 }
 
@@ -92,11 +92,11 @@ func (srcpkg *SrcPkg) Extract(destdir string) (string, os.Error) {
 		if err != nil {
 			return "", err
 		}
-		
+
 		switch hdr.Typeflag {
 		case tar.TypeDir:
 			if tardir := strings.TrimRight(hdr.Name, "/"); tardir != dirname {
-				msg := "Tarball dir ("+hdr.Name+") should be "+dirname
+				msg := "Tarball dir (" + hdr.Name + ") should be " + dirname
 				return "", os.NewError(msg)
 			}
 			if err := prepDirectory(destpkgdir); err != nil {
@@ -109,7 +109,7 @@ func (srcpkg *SrcPkg) Extract(destdir string) (string, os.Error) {
 			dir, filename := path.Split(hdr.Name)
 			dir = strings.TrimRight(dir, "/")
 			if dir != dirname {
-				tmp := "File (%s) in source package is not contained "+
+				tmp := "File (%s) in source package is not contained " +
 					"in the package dir (%s)"
 				errstr := fmt.Sprintf(tmp, hdr.Name, dirname)
 				return "", os.NewError(errstr)
@@ -119,16 +119,18 @@ func (srcpkg *SrcPkg) Extract(destdir string) (string, os.Error) {
 			return "", os.NewError("Invalid tar header type")
 		}
 	}
-	
+
 	return destpkgdir, nil
 }
 
 // prepDirectory creates a new directory unless one already exists.
-func prepDirectory(newpath string) (os.Error) {
+func prepDirectory(newpath string) os.Error {
 	switch stat, err := os.Stat(newpath); {
 	case err == nil:
 		// If directory already exists that's cool, too.
-		if stat.IsDirectory() { return nil }
+		if stat.IsDirectory() {
+			return nil
+		}
 		return os.NewError(newpath + " already exists as non-directory")
 	case err.(*os.PathError).Error.String() == "no such file or directory":
 		// Nothing is in the way.
@@ -156,7 +158,7 @@ func (srcpkg *SrcPkg) extractFile(newpath string, hdr *tar.Header) os.Error {
 
 	ubuf := &syscall.Utimbuf{int32(hdr.Atime), int32(hdr.Mtime)}
 	if errno := syscall.Utime(newpath, ubuf); errno != 0 {
-		return os.NewError("Failed to set modification time for "+newpath)
+		return os.NewError("Failed to set modification time for " + newpath)
 	}
 
 	return nil
@@ -174,7 +176,7 @@ func NewPackageBuilder() *PackageBuilder {
 
 func isDirectory(dirpath string) bool {
 	pathinfo, err := os.Stat(dirpath)
-	if err != nil || ! pathinfo.IsDirectory() {
+	if err != nil || !pathinfo.IsDirectory() {
 		return false
 	}
 	return true

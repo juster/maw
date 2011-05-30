@@ -18,13 +18,13 @@ type FetchError interface {
 
 type FetchErrorRaw struct {
 	missing bool
-	query string
+	query   string
 	message string
 }
 
 type FetchErrorWrapper struct {
 	pkgname string
-	oserr os.Error
+	oserr   os.Error
 }
 
 func (err *FetchErrorRaw) String() string {

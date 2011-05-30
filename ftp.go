@@ -17,21 +17,21 @@ import (
 
 const (
 	ThreeDigits = "([0-9]+)"
-	AddrRegexp = ThreeDigits + "," + ThreeDigits + "," + ThreeDigits + "," +
+	AddrRegexp  = ThreeDigits + "," + ThreeDigits + "," + ThreeDigits + "," +
 		ThreeDigits + "," + ThreeDigits + "," + ThreeDigits
 	AnonPasswd = "maw@juster.us"
-	PreLogin = iota
-	LoggedIn = iota
+	PreLogin   = iota
+	LoggedIn   = iota
 	PostLogout = iota
 )
 
 var (
-	pasvMatch = regexp.MustCompile("^Entering Passive Mode \\("+AddrRegexp+"\\)\\.")
+	pasvMatch = regexp.MustCompile("^Entering Passive Mode \\(" + AddrRegexp + "\\)\\.")
 )
 
 type FtpConn struct {
 	state, pendingTransfers int
-	p *proto.Conn
+	p                       *proto.Conn
 }
 
 func DialFtp(addr string) (*FtpConn, os.Error) {
@@ -46,7 +46,7 @@ func (ftp *FtpConn) expectResp(expectedCode int) (string, os.Error) {
 	// Loop is here in case we get a 226 response and need to read again.
 	for {
 		code, msg, err := ftp.p.ReadResponse(expectedCode)
-	
+
 		// This code is sent whenever the data connection is closed
 		// (i.e. file is finished downloading)
 		if code == 226 {
@@ -79,7 +79,7 @@ func (ftp *FtpConn) anonLogin() os.Error {
 	if err != nil {
 		return loginError(err)
 	}
-	
+
 	if err = ftp.p.PrintfLine("PASS %s", AnonPasswd); err != nil {
 		return err
 	}
@@ -87,7 +87,7 @@ func (ftp *FtpConn) anonLogin() os.Error {
 	if err != nil {
 		return loginError(err)
 	}
-	
+
 	ftp.state = LoggedIn
 	return nil
 }
@@ -116,7 +116,7 @@ func (ftp *FtpConn) Fetch(rpath string) (io.Reader, os.Error) {
 	if err != nil {
 		return nil, dlError(err)
 	}
-	
+
 	// Make sure we use passive mode for downloading. With passive mode the client
 	// starts the data connection to the server, not the other way around.
 	if err := ftp.p.PrintfLine("PASV"); err != nil {
@@ -126,7 +126,7 @@ func (ftp *FtpConn) Fetch(rpath string) (io.Reader, os.Error) {
 	if err != nil {
 		return nil, dlError(err)
 	}
-	
+
 	var addrstr string
 	if addrcomps := pasvMatch.FindStringSubmatch(msg); len(addrcomps) == 7 {
 		addrstr = addrToStr(addrcomps[1:])
@@ -142,7 +142,7 @@ PasvSuccess:
 	if err != nil {
 		return nil, dlError(err)
 	}
-	
+
 	// Now we can signal the server to start the file transfer.
 	if err := ftp.p.PrintfLine("RETR %s", rpath); err != nil {
 		dconn.Close()
@@ -176,10 +176,10 @@ func addrToStr(addr []string) string {
 	if len(addr) != 6 {
 		return ""
 	}
-	
+
 	// The host is pretty easy to convert into an address usable by Dial...
 	host := strings.Join(addr[0:4], ".")
-	
+
 	// The port is given as two numbers, a high byte and a low byte.
 	port, err := strconv.Atoi(addr[4])
 	if err != nil {

@@ -19,7 +19,7 @@ type PacmanFetcher struct {
 	pkgdest string
 }
 
-func (pf *PacmanFetcher) readLine(readhandle io.Reader) (string) {
+func (pf *PacmanFetcher) readLine(readhandle io.Reader) string {
 	buf := bufio.NewReader(readhandle)
 	line, _, _ := buf.ReadLine()
 	return string(line)
@@ -41,10 +41,10 @@ func (pf *PacmanFetcher) findPackageUrl(pkgname string) (string, FetchError) {
 
 	if code := waitmsg.ExitStatus(); code != 0 {
 		errline := pf.readLine(cmd.Stderr)
-		if errline == "error: target not found: " + pkgname {
+		if errline == "error: target not found: "+pkgname {
 			return "", NotFoundError(pkgname)
 		}
-		return "", NewFetchError(pkgname, "pacman " + errline)
+		return "", NewFetchError(pkgname, "pacman "+errline)
 	}
 
 	url := pf.readLine(cmd.Stdout)
@@ -61,23 +61,24 @@ func (pf *PacmanFetcher) Fetch(pkgname string) ([]string, FetchError) {
 	if oserr != nil {
 		return nil, FetchErrorWrap(pkgname, oserr)
 	}
-	
+
 	var pkgpath string
 
 	switch url.Scheme {
-	case "http": fallthrough
+	case "http":
+		fallthrough
 	case "https":
 		pkgpath, oserr = pf.httpDownload(url)
 	case "ftp":
 		pkgpath, oserr = pf.ftpDownload(url)
 	default:
-		return nil, NewFetchError(pkgname, "Unrecognized URL scheme: " + url.Scheme)
+		return nil, NewFetchError(pkgname, "Unrecognized URL scheme: "+url.Scheme)
 	}
 
 	if oserr != nil {
 		return nil, FetchErrorWrap(pkgname, oserr)
 	}
-	
+
 	return []string{pkgpath}, nil
 }
 
@@ -104,7 +105,7 @@ func (pf *PacmanFetcher) ftpDownload(url *http.URL) (string, os.Error) {
 	if err != nil {
 		return "", err
 	}
-	
+
 	_, err = io.Copy(destfile, rdr)
 	if err != nil {
 		return "", err
@@ -119,18 +120,18 @@ func (pf *PacmanFetcher) httpDownload(url *http.URL) (string, os.Error) {
 	if err != nil {
 		return "", err
 	}
-	
+
 	req.UserAgent = MAW_USERAGENT
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		return "", err
 	}
 	defer resp.Body.Close()
-	
+
 	if resp.StatusCode != 200 {
-		return "", os.NewError("Download of "+url.String()+" failed: HTTP "+resp.Status)
+		return "", os.NewError("Download of " + url.String() + " failed: HTTP " + resp.Status)
 	}
-	
+
 	_, filename := path.Split(url.Path)
 	destpath := path.Join(pf.pkgdest, filename)
 	destfile, err := os.Create(destpath)
@@ -138,7 +139,7 @@ func (pf *PacmanFetcher) httpDownload(url *http.URL) (string, os.Error) {
 		return "", err
 	}
 	defer destfile.Close()
-	
+
 	if resp.ContentLength < 0 {
 		_, err = io.Copy(destfile, resp.Body)
 	} else {
@@ -147,6 +148,6 @@ func (pf *PacmanFetcher) httpDownload(url *http.URL) (string, os.Error) {
 	if err != nil {
 		return "", err
 	}
-	
+
 	return destpath, nil
 }

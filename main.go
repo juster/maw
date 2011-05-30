@@ -14,17 +14,17 @@ import (
 
 const (
 	MAW_USERAGENT = "maw/1.0"
-	MAW_ENVVAR = " MAWSECRET " // spaces are there so PKGBUILDs can't use it [easily]
-	OptQuery = iota
-	OptRemove = iota
-	OptSync = iota
-	OptDepTest = iota
-	OptHelp = iota
+	MAW_ENVVAR    = " MAWSECRET " // spaces are there so PKGBUILDs can't use it [easily]
+	OptQuery      = iota
+	OptRemove     = iota
+	OptSync       = iota
+	OptDepTest    = iota
+	OptHelp       = iota
 )
 
 type MawOpt struct {
-	Action int
-	AsDeps bool
+	Action  int
+	AsDeps  bool
 	Targets []string
 }
 
@@ -41,20 +41,25 @@ func lookupSudoUser() *user.User {
 
 func ParseOpts(cmdopts []string) *MawOpt {
 	if len(cmdopts) == 0 {
-		return &MawOpt{Action:OptHelp}
+		return &MawOpt{Action: OptHelp}
 	}
-	
+
 	var act int
 	var asdeps bool
 
 	switch cmdopts[0] {
-	case "-Qq": act = OptQuery
-	case "-Rns": act = OptRemove
-	case "-S": act = OptSync
-	case "-T": act = OptDepTest
-	default: act = OptHelp
+	case "-Qq":
+		act = OptQuery
+	case "-Rns":
+		act = OptRemove
+	case "-S":
+		act = OptSync
+	case "-T":
+		act = OptDepTest
+	default:
+		act = OptHelp
 	}
-	
+
 	// Don't accidentally make flags into target packages.
 	targets := make([]string, 0, len(cmdopts)-1)
 	for _, opt := range cmdopts[1:] {
@@ -64,15 +69,15 @@ func ParseOpts(cmdopts []string) *MawOpt {
 			asdeps = true
 		}
 	}
-	
+
 	return &MawOpt{act, asdeps, targets}
 }
 
-func runPacman(flag string, args ... string) (int, os.Error) {
+func runPacman(flag string, args ...string) (int, os.Error) {
 	procargs := make([]string, 2, len(args)+2)
 	procargs[0] = "pacman"
 	procargs[1] = flag
-	procargs = append(procargs, args ...)
+	procargs = append(procargs, args...)
 
 	cmd, err := exec.Run("/usr/bin/pacman", procargs, nil, "",
 		exec.PassThrough, exec.PassThrough, exec.PassThrough)
@@ -117,11 +122,11 @@ func fetchAllPackages(pkgnames []string, fetchers []PackageFetcher) ([]string, o
 	// Waits for all goroutines to finish, collecting results
 	allpkgpaths := make([]string, 0, 256) // TODO: use cap or something
 	for i, c := range chans {
-		pkgpaths := <- c
+		pkgpaths := <-c
 		if pkgpaths == nil {
 			return nil, os.NewError("could not find " + pkgnames[i])
 		} else {
-			allpkgpaths = append(allpkgpaths, pkgpaths ...)
+			allpkgpaths = append(allpkgpaths, pkgpaths...)
 		}
 	}
 
@@ -158,12 +163,12 @@ func installPkgFiles(pkgpaths []string, asdeps bool) int {
 	if asdeps {
 		args = make([]string, 1, len(pkgpaths)+1)
 		args[0] = "--asdeps"
-		args = append(args, pkgpaths ...)
+		args = append(args, pkgpaths...)
 	} else {
 		args = pkgpaths
 	}
 
-	code, err := runPacman("-U", pkgpaths ...)
+	code, err := runPacman("-U", pkgpaths...)
 	if err != nil {
 		fmt.Printf("error: %s\n", err.String())
 		return 1
@@ -175,21 +180,21 @@ func installPkgFiles(pkgpaths []string, asdeps bool) int {
 func runSyncInstall(opt *MawOpt) int {
 	// Binary packages and source packages end up in /tmp
 	os.Setenv("PKGDEST", "/tmp")
-	
+
 	builder := &PackageBuilder{}
 	aurCache := NewAURCache("/tmp", ".", builder)
 	fetchers := []PackageFetcher{&PacmanFetcher{"/tmp"}, aurCache}
-	
+
 	if len(opt.Targets) == 0 {
 		fmt.Printf("error: no targets specified (use -h for help)\n")
 	}
-	
+
 	pkgpaths, err := fetchAllPackages(opt.Targets, fetchers)
 	if err != nil {
 		fmt.Printf("error: %s\n", err.String())
 		return 1
 	}
-	
+
 	return installPkgFiles(pkgpaths, opt.AsDeps)
 }
 
