@@ -12,18 +12,20 @@ import (
 	"exec"
 )
 
+type CmdOpt int
+
 const (
 	MAW_USERAGENT = "maw/1.0"
 	MAW_ENVVAR    = " MAWSECRET " // spaces are there so PKGBUILDs can't use it [easily]
-	OptQuery      = iota
-	OptRemove     = iota
-	OptSync       = iota
-	OptDepTest    = iota
-	OptHelp       = iota
+	OptQuery      CmdOpt          = iota
+	OptRemove
+	OptSync
+	OptDepTest
+	OptHelp
 )
 
 type MawOpt struct {
-	Action  int
+	Action  CmdOpt
 	AsDeps  bool
 	Targets []string
 }
@@ -44,7 +46,7 @@ func ParseOpts(cmdopts []string) *MawOpt {
 		return &MawOpt{Action: OptHelp}
 	}
 
-	var act int
+	var act CmdOpt
 	var asdeps bool
 
 	switch cmdopts[0] {
