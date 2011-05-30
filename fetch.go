@@ -63,3 +63,71 @@ func (wrap *FetchErrorWrapper) NotFound() bool {
 type PackageFetcher interface {
 	Fetch(pkgname string) ([]string, FetchError)
 }
+
+////////////////////////////////////////////////////////////////////////////////
+
+// The MultiFetcher not only fetches from multiple other fetchers but also fetches multiple
+// packages at the same time! Zing!
+type MultiFetcher struct {
+	fetchers []PackageFetcher
+}
+
+type fetchResult struct {
+	pkgs  []string
+	error FetchError
+}
+
+func NewMultiFetcher(fetchers ...PackageFetcher) *MultiFetcher {
+	return &MultiFetcher{fetchers}
+}
+
+func (mf *MultiFetcher) FetchAll(pkgnames []string) ([]string, os.Error) {
+	// Packages are all fetched concurrently, independent of each other
+	chans := make([]chan *fetchResult, len(pkgnames))
+	for i, pkgname := range pkgnames {
+		r := make(chan *fetchResult, 1)
+		go mf.chanFetch(pkgname, r)
+		chans[i] = r
+	}
+
+	// Waits for all goroutines to finish, collecting results
+	allpkgpaths := make([]string, 0, 256) // TODO: use cap or something?
+	for i, c := range chans {
+		result := <-c
+		if result.error == nil {
+			allpkgpaths = append(allpkgpaths, result.pkgs...)
+		} else if result.error.NotFound() {
+			return nil, os.NewError("could not find " + pkgnames[i])
+		} else {
+			return nil, result.error
+		}
+	}
+
+	return allpkgpaths, nil
+}
+
+// chanFetch is a simple wrapper to make Fetch more concurrent.
+func (mf *MultiFetcher) chanFetch(pkgname string, results chan *fetchResult) {
+	paths, err := mf.Fetch(pkgname)
+	results <- &fetchResult{paths, err}
+}
+
+func (mf *MultiFetcher) Fetch(pkgname string) ([]string, FetchError) {
+	var pkgpaths []string
+
+SearchLoop:
+	for _, fetcher := range mf.fetchers {
+		var err FetchError
+		pkgpaths, err = fetcher.Fetch(pkgname)
+		if pkgpaths != nil {
+			return pkgpaths, nil
+		} else {
+			if err.NotFound() {
+				continue SearchLoop
+			}
+			return nil, err
+		}
+	}
+
+	return nil, NotFoundError(pkgname)
+}

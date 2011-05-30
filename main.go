@@ -110,54 +110,6 @@ func runDepTest(opt *MawOpt) int {
 ////////////////////////////////////////////////////////////////////////////////
 // SYNCING
 
-func fetchAllPackages(pkgnames []string, fetchers []PackageFetcher) ([]string, os.Error) {
-	// Packages are all fetched concurrently, independent of each other
-	chans := make([]chan []string, len(pkgnames))
-	for i, pkgname := range pkgnames {
-		r := make(chan []string, 1)
-		go fetchPackage(pkgname, fetchers, r)
-		chans[i] = r
-	}
-
-	// Waits for all goroutines to finish, collecting results
-	allpkgpaths := make([]string, 0, 256) // TODO: use cap or something
-	for i, c := range chans {
-		pkgpaths := <-c
-		if pkgpaths == nil {
-			return nil, os.NewError("could not find " + pkgnames[i])
-		} else {
-			allpkgpaths = append(allpkgpaths, pkgpaths...)
-		}
-	}
-
-	return allpkgpaths, nil
-}
-
-// fetchPackage tries to download or build the package file for the package named by pkgname.
-// The resulting package files are sent over the results channel. Since multi-packages can
-// build more than one package file, a slice of strings is sent over the channel.
-func fetchPackage(pkgname string, fetchers []PackageFetcher, results chan []string) {
-	var pkgpaths []string
-
-SearchLoop:
-	for _, fetcher := range fetchers {
-		var err FetchError
-		pkgpaths, err = fetcher.Fetch(pkgname)
-		if err != nil {
-			if err.NotFound() {
-				continue SearchLoop
-			} else {
-				fmt.Printf("error: %s\n", err.String())
-				break SearchLoop
-				// pkgpaths is now nil
-			}
-		}
-		break
-	}
-
-	results <- pkgpaths
-}
-
 func installPkgFiles(pkgpaths []string, asdeps bool) int {
 	var args []string
 	if asdeps {
@@ -178,18 +130,19 @@ func installPkgFiles(pkgpaths []string, asdeps bool) int {
 }
 
 func runSyncInstall(opt *MawOpt) int {
+	if len(opt.Targets) == 0 {
+		fmt.Printf("error: no targets specified (use -h for help)\n")
+		return 0
+	}
+
 	// Binary packages and source packages end up in /tmp
 	os.Setenv("PKGDEST", "/tmp")
 
 	builder := &PackageBuilder{}
 	aurCache := NewAURCache("/tmp", ".", builder)
-	fetchers := []PackageFetcher{&PacmanFetcher{"/tmp"}, aurCache}
+	multifetch := NewMultiFetcher(&PacmanFetcher{"/tmp"}, aurCache)
 
-	if len(opt.Targets) == 0 {
-		fmt.Printf("error: no targets specified (use -h for help)\n")
-	}
-
-	pkgpaths, err := fetchAllPackages(opt.Targets, fetchers)
+	pkgpaths, err := multifetch.FetchAll(opt.Targets)
 	if err != nil {
 		fmt.Printf("error: %s\n", err.String())
 		return 1
