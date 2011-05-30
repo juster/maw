@@ -7,7 +7,6 @@ package main
 import (
 	"os"
 	"io"
-	"fmt"
 	"bufio"
 	"exec"
 	"path"
