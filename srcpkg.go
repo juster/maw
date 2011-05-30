@@ -234,7 +234,7 @@ func NewPkgPathFile() (*PkgPathFile, os.Error) {
 	if sudouser == nil {
 		return pathfile, nil
 	}
-	tmpfile.Chown(sudouser.Uid, sudouser)
+	tmpfile.Chown(sudouser.Uid, sudouser.Gid)
 	return pathfile, nil
 }
 
