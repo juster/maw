@@ -30,6 +30,29 @@ type MawOpt struct {
 	Targets []string
 }
 
+func (mopt *MawOpt) trimDepSpecs() {
+	newtargs := make([]string, len(mopt.Targets), len(mopt.Targets))
+
+TargetLoop:
+	for i, targ := range mopt.Targets {
+		for idx, ch := range targ {
+			switch ch {
+			case '<':
+				fallthrough
+			case '>':
+				fallthrough
+			case '=':
+				newtargs[i] = targ[:idx]
+				continue TargetLoop
+			}
+		}
+
+		newtargs[i] = targ
+	}
+
+	mopt.Targets = newtargs
+}
+
 /* This is used by other files, like in srcpkg.go and aur.go.
  * Kind of awkward placement but ohwell... */
 func lookupSudoUser() *user.User {
@@ -137,9 +160,6 @@ func runSyncInstall(opt *MawOpt) int {
 		return 0
 	}
 
-	// Binary packages and source packages end up in /tmp
-	os.Setenv("PKGDEST", "/tmp")
-
 	builder := &PackageBuilder{}
 	aurCache := NewAURCache("/tmp", ".", builder)
 	multifetch := NewMultiFetcher(&PacmanFetcher{"/tmp"}, aurCache)
@@ -164,6 +184,7 @@ func main() {
 		retcode := runDepTest(opt)
 		os.Exit(retcode)
 	case OptSync:
+		opt.trimDepSpecs()
 		retcode := runSyncInstall(opt)
 		os.Exit(retcode)
 	}
