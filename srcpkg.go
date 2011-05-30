@@ -230,11 +230,11 @@ func NewPkgPathFile() (*PkgPathFile, os.Error) {
 
 	// If we are running under sudo, we must chmod the tempfile to the user
 	// whom we are going to be dropping privledges to (the SUDO_USER).
-	sudouser := lookupSudoUser()
-	if sudouser == nil {
+	uid, gid := lookupSudoUser()
+	if uid == 0 {
 		return pathfile, nil
 	}
-	tmpfile.Chown(sudouser.Uid, sudouser.Gid)
+	tmpfile.Chown(uid, gid)
 	return pathfile, nil
 }
 

@@ -7,9 +7,9 @@ package main
 
 import (
 	"os"
-	"os/user"
 	"fmt"
 	"exec"
+	"strconv"
 )
 
 type CmdOpt int
@@ -53,15 +53,29 @@ TargetLoop:
 	mopt.Targets = newtargs
 }
 
-/* This is used by other files, like in srcpkg.go and aur.go.
- * Kind of awkward placement but ohwell... */
-func lookupSudoUser() *user.User {
-	sudouser := os.Getenv("SUDO_USER")
-	if sudouser == "" {
-		return nil
+// This is used by other files, like in srcpkg.go and aur.go.
+// Kind of awkward placement but oh well...
+func lookupSudoUser() (uid, gid int) {
+	uidstr := os.Getenv("SUDO_UID")
+	if uidstr == "" {
+		return
 	}
-	userobj, _ := user.Lookup(sudouser)
-	return userobj
+	gidstr := os.Getenv("SUDO_GID")
+	if gidstr == "" {
+		return
+	}
+
+	var err os.Error
+	uid, err = strconv.Atoi(uidstr)
+	if err != nil {
+		return
+	}
+	gid, err = strconv.Atoi(gidstr)
+	if err != nil {
+		uid = 0
+		return
+	}
+	return
 }
 
 func ParseOpts(cmdopts []string) *MawOpt {

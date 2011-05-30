@@ -46,9 +46,9 @@ func (aur *AURCache) Fetch(pkgname string) ([]string, FetchError) {
 	}
 
 	// If we are running under sudo, we do not want our files to be owned by root.
-	sudoUser := lookupSudoUser()
-	if sudoUser != nil {
-		os.Chown(srcpath, sudoUser.Uid, sudoUser.Gid)
+	uid, gid := lookupSudoUser()
+	if uid != 0 {
+		os.Chown(srcpath, uid, gid)
 	}
 
 	srcdir, err := srcpkg.Extract(aur.buildroot)
@@ -57,8 +57,8 @@ func (aur *AURCache) Fetch(pkgname string) ([]string, FetchError) {
 		return nil, FetchErrorWrap(pkgname, err)
 	}
 
-	if sudoUser != nil {
-		chownDirRec(srcdir, sudoUser.Uid, sudoUser.Gid)
+	if uid != 0 {
+		chownDirRec(srcdir, uid, gid)
 	}
 
 	pkgpaths, err := aur.builder.Build(srcdir)
