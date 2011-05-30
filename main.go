@@ -17,7 +17,10 @@ type CmdOpt int
 const (
 	MAW_USERAGENT = "maw/1.0"
 	MAW_ENVVAR    = " MAWSECRET " // spaces are there so PKGBUILDs can't use it [easily]
-	OptQuery      CmdOpt          = iota
+)
+
+const (
+	OptQuery CmdOpt = iota
 	OptRemove
 	OptSync
 	OptDepTest
@@ -31,26 +34,16 @@ type MawOpt struct {
 }
 
 func (mopt *MawOpt) trimDepSpecs() {
-	newtargs := make([]string, len(mopt.Targets), len(mopt.Targets))
-
 TargetLoop:
 	for i, targ := range mopt.Targets {
 		for idx, ch := range targ {
 			switch ch {
-			case '<':
-				fallthrough
-			case '>':
-				fallthrough
-			case '=':
-				newtargs[i] = targ[:idx]
+			case '<', '>', '=':
+				mopt.Targets[i] = targ[:idx]
 				continue TargetLoop
 			}
 		}
-
-		newtargs[i] = targ
 	}
-
-	mopt.Targets = newtargs
 }
 
 // This is used by other files, like in srcpkg.go and aur.go.
