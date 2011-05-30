@@ -29,7 +29,7 @@ type FetchErrorWrapper struct {
 
 func (err *FetchErrorRaw) String() string {
 	if err.missing {
-		return fmt.Sprintf("error: target not found %s", err.query)
+		return fmt.Sprintf("target not found %s", err.query)
 	}
 	return err.message
 }
@@ -92,12 +92,10 @@ func (mf *MultiFetcher) FetchAll(pkgnames []string) ([]string, os.Error) {
 
 	// Waits for all goroutines to finish, collecting results
 	allpkgpaths := make([]string, 0, 256) // TODO: use cap or something?
-	for i, c := range chans {
+	for _, c := range chans {
 		result := <-c
 		if result.error == nil {
 			allpkgpaths = append(allpkgpaths, result.pkgs...)
-		} else if result.error.NotFound() {
-			return nil, os.NewError("could not find " + pkgnames[i])
 		} else {
 			return nil, result.error
 		}
