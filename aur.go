@@ -19,8 +19,9 @@ const (
 )
 
 type AURCache struct {
-	srcpkgdest, buildroot string
-	builder               *PackageBuilder
+	srcpkgdest string
+	buildroot  string
+	builder    *PackageBuilder
 }
 
 func NewAURCache(srcdest, buildroot string, builder *PackageBuilder) *AURCache {
